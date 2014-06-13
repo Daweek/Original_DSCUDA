@@ -1,0 +1,988 @@
+#!/usr/bin/ruby -w
+
+$LOAD_PATH.unshift("#{File.dirname($0)}/../lib/")
+
+require 'English'
+require 'optparse'
+
+# DSCUDA modules
+require 'utility'
+
+include Utility
+
+Dscudaincdir = "#{File.dirname($0)}/../include/"
+Dscudalibdir = "#{File.dirname($0)}/../lib/"
+Dscudatmpdir = './dscudatmp'
+
+EndOfPtx     = "#pragma dscuda endofptx\n"
+
+Cudapath      = ENV['CUDAPATH'] ? ENV['CUDAPATH'] : '/usr/local/cuda'
+Nvcc          = ENV['NVCC'] ? ENV['NVCC'] : "#{Cudapath}/bin/nvcc"
+Cudaincdir    = "#{Cudapath}/include"
+Cudasdkincdir = (ENV['CUDASDKPATH'] ? ENV['CUDASDKPATH'] : "#{Cudapath}/NVIDIA_GPU_Computing_SDK") + "/C/common/inc"
+NvccPhaseOpts = %w[ --cuda --cubin --ptx --gpu --preprocess --generate-dependencies --compile --link --lib --run ] +
+                %w[  -cuda  -cubin  -ptx  -gpu  -E           -M                      -c        -link  -lib  -run ]
+Cxx           = ENV['CXX'] ? ENV['CXX'] : "g++"
+
+#
+# parse command-line arguments and then update the application context
+# according to the result.
+#
+def parse_commandline(ac)
+
+    umsg = <<-"EOUMSG"
+  usage: #{$0} [options] inputfile(s)...
+  options:
+      --infile <file>        : a .cu input file.
+      -i <file>
+
+      -o <file>              : an output file.
+
+      --verbose[=level]      : be verbose. the level can optionally be given. [2]
+      -v[level]                the higher level gives the more verbose messages. level 0 for silence.
+
+      --help                 : print this help.
+      -h
+  Note that all options not listed above are implicitly passed on to nvcc.
+
+EOUMSG
+
+  argsunused = []
+  until $ARGV.empty?
+    arg = $ARGV.shift
+    case arg
+      when /\A (?: --infile | -i ) \z/x
+      ac[:infile] = $ARGV.shift
+
+      when /\A -o \z/x
+      ac[:outfile] = $ARGV.shift
+
+      when /\A -I (.+) \z/x
+      ac[:incpath]   += " -I" + $1
+
+      when /\A -I \z/x
+      hpath = $ARGV.shift
+      ac[:incpath]   += " -I" + hpath
+
+      when /\A -D (.+) \z/x
+      ac[:cppdef]   += " -D" + $1
+
+      when /\A -D \z/x
+      defval = $ARGV.shift
+      ac[:cppdef]   += " -D" + defval
+
+      # verbose-option with level.
+      when /\A (?: --verbose= | -v ) (\d+)\b/x
+      ac[:verbose] = $1.to_i
+
+      # verbose-option without level. use default+1.
+      when /\A (?: --verbose | -v ) \z/x
+      ac[:verbose] = 3
+
+      when /\A (?: --help | -h ) \z/x
+      puts umsg
+      exit
+      else
+      argsunused.push arg
+    end # case
+  end
+
+  ac[:argsunused] = argsunused
+
+  unless ac[:infile]
+    puts "No input file given."
+    puts umsg
+    exit 1
+  end
+
+  return ac
+end
+
+#
+# The main routine starts from here.
+#
+def toplevel
+  app_context = {
+    :infile      => nil,
+    :outfile     => 'a.out',
+    :incpath     => '',
+    :cppdef      => '',
+    :verbose     => 2,
+  }
+  app_context = parse_commandline(app_context)
+  @verbose   = app_context[:verbose]
+  infile     = app_context[:infile]
+  incpath    = app_context[:incpath]
+  cppdef     = app_context[:cppdef]
+  argsunused = app_context[:argsunused]
+  vinfo("verbose:#{@verbose}")
+  vinfo("infile:#{infile}")
+#  ptxfile = File.basename(infile, '.cu') + '.ptx'
+  ptxfile = Dscudatmpdir + '/' + File.basename(infile) + '.ptx'
+  unless File.exist? Dscudatmpdir
+    Dir.mkdir Dscudatmpdir
+  end
+  vinfo("ptxfile:#{ptxfile}")
+
+  nvccarg = ' ' + argsunused.join(' ')
+  nvccarg += " #{incpath} "
+  nvccarg = nvccarg[1..-1]
+  vinfo("Args passed on to nvcc : #{nvccarg}")
+  ptxarg  = argsunused - NvccPhaseOpts
+  ptxarg  = ptxarg.inject('') { |memo, v|
+    if v =~ / \.(?: o | cu | c | cpp)\z /xms
+    else
+      memo += ' ' + v
+    end
+    memo
+  }
+  ptxarg += " #{incpath} "
+  vinfo("Args passed on to nvcc for .ptx generation: #{ptxarg}")
+
+  # generate a device code (.ptx file)
+  puts "generating .ptx..."
+  cmd = "#{Nvcc} #{ptxarg} #{cppdef} -I#{Dscudaincdir} -I#{Cudasdkincdir}" +
+    " --ptx -o #{ptxfile} #{infile}"
+  puts cmd
+  unless system(cmd)
+    raise "'#{cmd}' failed."
+  end
+  puts ".ptx generation done."
+
+  infile_rcu = cufile2rcufile(infile, ptxfile, incpath, cppdef)
+
+  # generate a host code.
+  cmd = "#{Nvcc} #{nvccarg} #{cppdef} -I#{Dscudaincdir} -I#{Cudasdkincdir} -L#{Dscudalibdir} -o #{app_context[:outfile]} #{infile_rcu}"
+  puts cmd
+  unless system(cmd)
+    raise "'#{cmd}' failed."
+  end
+
+end
+
+#
+# look for a file named 'fname' in 'searchpath'.
+# returns full path name for it.
+#
+def locate_file(fname, searchpath)
+  searchpath.each { |path|
+    fullname = "#{path}/#{fname}"
+    # "fullname:#{fullname}"
+    return fullname if (File.exist? fullname) 
+  }
+  vwarn("file #{fname} not found.")
+  return nil
+end
+
+#
+# look for #pragma once directive inside a file.
+# returns found_or_not & contents of the file.
+# the #pragma once directive(s) found are not included
+# in the returing contents.
+#
+def include_onlyonce? (file)
+  found = false
+  dststr = ''
+  open(file, 'r').each_line { |line|
+    if line =~ /\A \s* \#pragma \s+ once \s* \z/xs
+      found = true 
+    else
+      dststr += line
+    end
+  }
+  return found, dststr
+end
+
+#
+# recursively expand #include "foo.h" directives in srcstr,
+# while all other directives are remain unchanged.
+# note that :
+#   - #include <foo.h> directives are not expanded.
+#   - #pragma once directives inside #include "foo.h" files are properly handled.
+#
+def expand_inclusion(srcstr, searchpath, parent, onlyonce_files, level = 0)
+  dststr = ''
+  srcstr.each_line { |line|
+    if line =~ /\A \s* \#include \s* "(.*)" $/xms
+      hname = $1
+      if onlyonce_files.include? hname
+        vinfo('  ' * level + "don't include #{hname} included from #{parent}. " +
+              "it conains #pragma once, and already included.")
+        next # omits the line.
+      end
+      child_srcstr = locate_file(hname, searchpath)
+      if child_srcstr
+        onlyonce, contents = include_onlyonce?(child_srcstr)
+        onlyonce_files.push hname if onlyonce
+        onlyoncemsg = onlyonce ? ' only once' : ''
+        vinfo('  ' * level + "expand #{hname}#{onlyoncemsg}, included from #{parent}.")
+
+        contents = "#pragma begin #{hname}\n" + contents + "#pragma end #{hname}\n"
+
+        dststr += expand_inclusion(contents, searchpath, hname, onlyonce_files, level + 1)
+
+      else
+        raise "A file '#{hname}' included from #{parent} not found."
+      end  
+    else
+      dststr += line
+    end
+  }
+  dststr
+end
+
+def filter_cpp(srcstr, ipath, cppdef)
+  instream = "| cpp -x c++ #{ipath} #{cppdef} <<END_OF_SRC\n#{srcstr}\nEND_OF_SRC\n"
+  dststr = open(instream, 'r').read
+  dststr
+end
+
+def filter_cpp_for_regions(srcstr, ipath, cppdef)
+
+  dststr = ''
+  bufstr = ''
+  applycpp = false
+  srcstr.each_line { |line|
+    if line =~ /\#pragma \s+ dscuda \s+ cpp \s+ begin/xms
+      applycpp = true
+    end
+    if line =~ /\#pragma \s+ dscuda \s+ cpp \s+ end/xms
+      applycpp = false
+      dststr += filter_cpp(bufstr, ipath, cppdef)
+      bufstr = ''
+    end
+    if applycpp
+      bufstr += line
+    else
+      dststr += line
+    end
+  }
+
+  if applycpp
+      dststr += filter_cpp(bufstr, ipath, cppdef)
+  end
+
+
+  dststr
+end
+
+# substitute CUDA kernel calls with correspondent dscuda wrapper.
+#
+# eg) default shmem size & stream are added if necessary.
+#
+#     mykernel<<<g, b>>>(a0, a1, a2)
+#     => dscudamykernel(g, b , 0, NULL, a0, a1, a2)
+#
+# eg) for a call w/template, original call is instanciated (but never executed)
+#     in order to generate its entry in .ptx file.
+#
+#     mykernel<T0, T1><<<g, b , m, s>>>(a0, a1, a2)
+#     => false ? mykernel<T0, T1>(g, b , m, s, a0, a1, a2) : dscudamykernel<T0, T1>(g, b , m, s, a0, a1, a2)
+#        
+#
+def wrap_kernelcalls(srcstr)
+  dststr = ''
+  srcstr, dststr = skip_ptxdata(srcstr)
+
+  begin
+    nonlit, lit, left = srcstr.eat_a_c_literal()
+    srcstr = left
+
+    if nonlit =~ /\b (\w+) \s* (?: < ( \s* [^<]*?) > )? \s* <<< \s* ( .*? ) >>> \s* \( /xms
+
+      strpre = $`
+      strmatched = $&
+      strpost = $'
+      kname = $1
+      kts = $2
+      kps = $3
+
+      # capture the argumens of the CUDA API into arg0.
+      (matched, dummy, args0, postmatch) = ("(" + strpost).balanced_c_exp('(', ')', true)
+      unless matched # malformed function call. don't touch.
+        dststr += nonlit + lit
+        next
+      end
+      args0 = args0.split_c_exp_list
+
+      # generate a wrapper call.
+      args0 = args0.join(', ')
+      nkdir = kps.split_c_exp_list.size  # split kernel parameter list and count the number.
+      if nkdir < 3
+        kps += ', 0'  # append 3rd arg (shared mem size).
+      end
+      if nkdir < 4
+        kps += ', NULL'  # append 4th arg (stream id).
+      end
+      kts = kts ? "<#{kts}>" : ''
+      kps_args0 = kps + (args0.size > 0 ? ", #{args0}" : '')
+      str = "dscuda#{kname}#{kts}(#{kps_args0})"
+      vinfo("A kernel call found : #{strmatched.gsub(/\n/, ' ')[0..100]}...")
+      vinfo("Substituted with    : #{str}")
+      dststr += strpre + str
+      srcstr = postmatch + lit + srcstr
+    else
+      dststr += nonlit + lit
+    end
+
+  end while srcstr.size > 0
+
+  return dststr
+end
+
+#
+# Eat 'srcstr' until the end of embedded PTX data.
+# Returns eaten string and left string.
+#
+def skip_ptxdata(srcstr)
+#  puts "  looking for ptxdata.\n"
+  if srcstr =~ /^#{Regexp.escape(EndOfPtx)}/
+#    puts "  ptxdata skipped.\n"
+    dststr = $` + $&
+    srcstr = $'
+  else
+    puts "  ptxdata not found."
+=begin
+    open('aaa', 'w') { |f|
+      f.puts srcstr
+    }
+=end
+    exit 1
+  end
+  return srcstr, dststr
+end
+
+# substitute CUDA API calls with correspondent dscuda wrapper.
+#
+# eg) cudaMemcpyToSymbol(symbol, src, count, offset, kind)
+#     => dscudaMemcpyToSymbolWrapper(moduleid, "symbol", src, count, offset, kind)
+#
+#     cudaBindTextureToArray(texture, array, desc)
+#     => dscudaBindTextureToArrayWrapper(moduleid, "texture", texture, array, desc)
+#
+def wrap_cuda_apicalls(apinames, srcstr, ptxfile)
+  dststr = srcstr
+  apinames.each { |apiname|
+    srcstr = dststr
+
+    srcstr, dststr = skip_ptxdata(srcstr)
+    substituter = "substituter_#{apiname}".intern
+
+    begin
+      nonlit, lit, left = srcstr.eat_a_c_literal()
+      srcstr = left
+
+      case nonlit
+      when / \b #{apiname} \b \s* \( /xms
+        strpre = $`
+        strmatched = $&
+        strpost = $'
+
+        # capture the argumens of the CUDA API into arg0.
+        (matched, dummy, args0, postmatch) = ("(" + strpost).balanced_c_exp('(', ')', true)
+        unless matched # malformed function call. don't touch.
+          dststr += nonlit + lit
+          next
+        end
+        args0 = args0.split_c_exp_list
+
+        # substitute the apicall.
+        dststr += strpre + send(substituter, args0, ptxfile)
+        srcstr = postmatch + lit + srcstr
+
+      else # no more API call.
+        dststr += nonlit + lit
+      end # case
+
+    end while left.size > 0
+
+  } # apiname
+
+  return dststr
+end
+
+def substituter_cudaFuncGetAttributes(args, ptxfile)
+  strtmp = <<-"END_OF_TMP"
+    dscudaFuncGetAttributesWrapper(dscudaLoadModule(\"#{ptxfile}\", Ptxdata), %args%)
+END_OF_TMP
+
+  args[1] = args[1].double_quote
+  args = args.join(', ')
+
+  # generate a wrapper call.
+  str = strtmp.gsub(/\n/, '')
+  str = str.gsub(/%args%/, args)
+  str
+end
+
+def substituter_cudaMemcpyToSymbol(args, ptxfile)
+  strtmp = <<-"END_OF_TMP"
+    dscudaMemcpyToSymbolWrapper(dscudaLoadModule(\"#{ptxfile}\", Ptxdata), %args%)
+END_OF_TMP
+
+  args[0] = args[0].double_quote
+  args = args.join(', ')
+
+  # generate a wrapper call.
+  str = strtmp.gsub(/\n/, '')
+  str = str.gsub(/%args%/, args)
+  str
+end
+
+def substituter_cudaMemcpyToSymbolAsync(args, ptxfile)
+  strtmp = <<-"END_OF_TMP"
+    dscudaMemcpyToSymbolAsyncWrapper(dscudaLoadModule(\"#{ptxfile}\", Ptxdata), %args%)
+END_OF_TMP
+
+  args[0] = args[0].double_quote
+  args = args.join(', ')
+
+  # generate a wrapper call.
+  str = strtmp.gsub(/\n/, '')
+  str = str.gsub(/%args%/, args)
+  str
+end
+
+def substituter_cudaMemcpyFromSymbol(args, ptxfile)
+  strtmp = <<-"END_OF_TMP"
+    dscudaMemcpyFromSymbolWrapper(dscudaLoadModule(\"#{ptxfile}\", Ptxdata), %args%)
+END_OF_TMP
+
+  args[1] = args[1].double_quote
+  args = args.join(', ')
+
+  # generate a wrapper call.
+  str = strtmp.gsub(/\n/, '')
+  str = str.gsub(/%args%/, args)
+  str
+end
+
+def substituter_cudaMemcpyFromSymbolAsync(args, ptxfile)
+  strtmp = <<-"END_OF_TMP"
+    dscudaMemcpyFromSymbolAsyncWrapper(dscudaLoadModule(\"#{ptxfile}\", Ptxdata), %args%)
+END_OF_TMP
+
+  args[1] = args[1].double_quote
+  args = args.join(', ')
+
+  # generate a wrapper call.
+  str = strtmp.gsub(/\n/, '')
+  str = str.gsub(/%args%/, args)
+  str
+end
+
+def substituter_cudaBindTexture(args, ptxfile)
+  strtmp = <<-"END_OF_TMP"
+    dscudaBindTextureWrapper(dscudaLoadModule(\"#{ptxfile}\", Ptxdata), %args%)
+END_OF_TMP
+  arg1q = args[1].double_quote
+  args = args.join(', ')
+
+  # generate a wrapper call.
+  str = strtmp.gsub(/\n/, '')
+  str = str.gsub(/%args%/, "#{arg1q}, #{args}")
+  str
+end
+
+def substituter_cudaBindTexture2D(args, ptxfile)
+  strtmp = <<-"END_OF_TMP"
+    dscudaBindTexture2DWrapper(dscudaLoadModule(\"#{ptxfile}\", Ptxdata), %args%)
+END_OF_TMP
+  arg1q = args[1].double_quote
+  args = args.join(', ')
+
+  # generate a wrapper call.
+  str = strtmp.gsub(/\n/, '')
+  str = str.gsub(/%args%/, "#{arg1q}, #{args}")
+  str
+end
+
+def substituter_cudaBindTextureToArray(args, ptxfile)
+  strtmp = <<-"END_OF_TMP"
+    dscudaBindTextureToArrayWrapper(dscudaLoadModule(\"#{ptxfile}\", Ptxdata), %args%)
+END_OF_TMP
+  arg0q = args[0].double_quote
+  args = args.join(', ')
+
+  # generate a wrapper call.
+  str = strtmp.gsub(/\n/, '')
+  str = str.gsub(/%args%/, "#{arg0q}, #{args}")
+  str
+end
+
+def cufile2rcufile(cufile, ptxfile, incpath, cppdef)
+  rcufile = Dscudatmpdir + '/' + File.basename(cufile, '.cu') + '.rcu.cu'
+
+  puts('embedding .ptx files into the host codes...');
+  ptxstr = "static char *Ptxdata = \n"
+  open(ptxfile, 'r').read.each_line { |line|
+    line = line.chomp.gsub(/"/x) { '\\"' } # " is replaced with \".
+#    line = line.chomp.gsub(/%(?!%)/x) { '%%' } # % not followed by % is replaced with %%.
+    ptxstr += "    \"#{line}\\n\"\n"
+  }
+  ptxstr[-1] = ";\n"
+  ptxstr += EndOfPtx
+
+  # read .cu preceded by #incldue "dscuda.h" & PTX data.
+  dststr = ptxstr
+  dststr += %Q[#include "dscuda.h"\n]
+  open(cufile, 'r').each_line { |line|
+    dststr += line
+  }
+
+  # just to remove some annoying warnings for redefinition of some macros.
+  tmpstr = <<-"END_OF_TMPSTR"
+// remove definition of some macros which will be redefined in \"cutil_inline.h\".
+#ifdef MIN
+#undef MIN
+#endif
+#ifdef MAX
+#undef MAX
+#endif
+END_OF_TMPSTR
+  dststr = dststr.gsub(/(\#include \s* <cutil_inline.h>) /x) { tmpstr + $1 }
+  dststr = dststr.gsub(/(\#include \s* <shrUtils.h>) /x) { tmpstr + $1 }
+
+  ipath = incpath.gsub(/-I/xms, '').strip.split(/\s+/xms)
+  ipath += [Dscudaincdir, Cudasdkincdir, Cudaincdir, '/usr/include', ]
+
+  puts('expanding file inclusion...')
+
+  srcstr, dststr = skip_ptxdata(dststr)
+  dststr += expand_inclusion(srcstr, ipath, cufile, [], 0)
+
+  incpath += " -I#{Dscudaincdir} -I#{Cudasdkincdir} -I#{Cudaincdir} "
+  puts("filterling cpp directives (only for regions specified by 'dscuda cpp' directives)...")
+  dststr = filter_cpp_for_regions(dststr, incpath, cppdef)
+  puts('removing C comments...')
+
+  srcstr, dststr = skip_ptxdata(dststr)
+  dststr += srcstr.omit_c_comments
+
+  # generate DSCUDA-kernel stubs.
+  puts('parsing kernel definitions...')
+  kernels, dststr = parse_kernel_def(dststr)
+  dststr = append_kernel_stub(dststr, ptxfile, kernels)
+
+  # substitute CUDA-kernel calls with DSCUDA-kernel stub calls.
+  puts('wraping kernel calls...')
+  dststr = wrap_kernelcalls(dststr)
+
+  # substitute some CUDA API calls with correspondent dscuda wrapper.
+  apinames = ["cudaMemcpyToSymbol",
+              "cudaMemcpyToSymbolAsync",
+              "cudaMemcpyFromSymbol",
+              "cudaMemcpyFromSymbolAsync",
+              "cudaBindTexture",
+              "cudaBindTexture2D",
+              "cudaBindTextureToArray",
+              "cudaFuncGetAttributes",
+             ]
+  puts('wraping CUDA API calls...')
+  dststr = wrap_cuda_apicalls(apinames, dststr, ptxfile)
+
+  open(rcufile, "w") { |f|
+    f.puts dststr
+  }
+  puts("wrote '#{rcufile}'.")
+
+  return rcufile
+end
+
+
+# kernel definitions in srcstr are parsed.
+# info for each kernel are returned as kdef.
+# original defs in srcstr are replaced with dummy ones and returned as dststr.
+#
+# eg) __global__ void myKernel(float *a, float *b) {
+#         int i = threadIdx.x;
+#         b[i] = a[i] * 2;
+#     }
+#
+#     => kdefs, dststr
+#        where kdefs = [ [:name=myKernel, :arg=[a,b], ...], ]
+#              dststr = "__global__ void myKernel(float *a, float *b) { /* nop */ }"
+#
+def parse_kernel_def(srcstr)
+  cudaKernelRe1 = %r{
+                      (?: (template \s* <[^>]*>) \s+)* #1 template <>
+                      \b ( \s* extern \s+ "C" \s+)*    #2 extern "C"
+                      \b ( \s* static \s+)*            #3 static
+                      __global__ \s+
+                      (?: \s* \w+ \b | \s* \* )* \s* (\w+) \s*  #4 kernel name
+                    }xm
+
+  kdefs = []
+  dststr = ''
+  strleft = srcstr
+
+  kid = 0
+  until srcstr.empty?
+    if srcstr !~ cudaKernelRe1
+      dststr += srcstr
+      break
+    end
+    strpre  = $`
+    strbody = $&
+    strleft = $'
+    kdef = {}
+    kdef[:template] = $1
+    kdef[:extc] = $2
+    kdef[:static] = $3
+    kdef[:name] = $4
+    kdef[:id] = kid
+    kdef[:arg] = ''
+    kdef[:argtypes] = []
+    kdef[:argnames] = []
+
+    (matched, pre, args, strleft) = strleft.balanced_c_exp('(', ')', true)
+
+    raise "No arg list found for kernel #{kdef[:name]}." unless matched
+    if strleft =~ /\A \s* ; /xms  # skip prototype. we are interested in function definition, but not in prototype.
+      srcstr = strleft
+      dststr += strpre + strbody + pre + '(' + args + ')'
+      next
+    end
+
+    kid += 1
+    args = args.strip
+    kdef[:arg] = args
+    args = args.split(/\s*,\s*/xms)
+    vinfo("kernel '#{kdef[:template]} #{kdef[:name]}' diagnostics:")
+    args.each_with_index { |arg, i|
+      vinfo("  arg#{i}      : #{arg}")
+      unless arg =~ /\A (
+                          (?:
+                            (?:
+                              # type name with optional C-template arg <>
+                              \w+ \s* (?:
+                                         <\w+ (?: \s*,\s*\w+)* >
+                                      )? \s* |
+                              # dereference operator
+                              \* \s* 
+                            )+
+                            # the last word may or may not be decorated with *, [], or ().
+                            # eg) (*x)[3]
+                            [^\w]* (\w+)
+                          )* 
+                        ) /xms
+        raise "arg (#{arg}) could not parsed."
+      end
+      tokens = $1.split(/(?:\s+|\b)/).collect { |token| token.strip}.compact
+      # puts tokens.inject("token: "){ |buf, token| buf << token + '|'}
+      type = tokens[0..-2].join(' ')
+      name = tokens[-1]
+      isptr = (arg =~ /\*/) ? true : false
+      type = '*' if isptr
+      kdef[:argnames].push name
+      case type
+      when / \*  /x                  # any pointer.
+        kdef[:argtypes].push 'dscudaArgTypeP'
+
+      when /\b float \z/x            # float.
+        kdef[:argtypes].push 'dscudaArgTypeF'
+
+      when /\b (?: long \b | short \b ) (\s+ int)? \z/x # non 32-bit int variant.
+        kdef[:argtypes].push type
+        vwarn "CUDA kernel '#{kdef[:name]}' argument '#{name}'  custom type '#{type}'."
+
+      when /\A (\w*\s+)* int \s* \z/x       # int, maybe decorated with const or unsigned.
+        kdef[:argtypes].push 'dscudaArgTypeI'
+        vwarn "CUDA kernel '#{kdef[:name]}' argument '#{name}' of type '#{type}', treated as int." if $1
+
+      else                           # anything not matched above, including long/short int, char, double, struct etc.
+        kdef[:argtypes].push type
+        vwarn "CUDA kernel '#{kdef[:name]}' argument '#{name}'  custom type '#{type}'."
+      end
+    }
+    vinfo("  id        : #{kdef[:id]}")
+    vinfo("  arg types : #{kdef[:argtypes].join('|')}")
+    vinfo("  arg names : #{kdef[:argnames].inject{ |sum,a|sum+=sprintf("%14s",'|'+a)}}")
+
+    (matched, pre, body, strleft) = strleft.balanced_c_exp('{', '}', true) # skip decl body.
+    kdefs.push kdef
+    srcstr = strleft
+    dststr += strpre + strbody + "(#{kdef[:arg]})\n{\n    /* nop */\n}\n\n"
+#    dststr += strpre + strbody + "\n" # !!!
+  end
+
+  return kdefs, dststr
+end
+
+#
+# insert DSCUDA-kernel defs just before original prototypes or defs,
+# so that all necessary typedef, templates, #define-s are ready at that point.
+#
+def append_kernel_stub(srcstr, ptxfile, kdefs)
+  pretmp = <<-'END_OF_PRETMP'
+void
+dscuda%kname%(dim3 _gdim, dim3 _bdim, size_t _smemsize, cudaStream_t _stream %kargs%)
+{
+    int _narg = %kargc%;
+    int _ibvgdim[3], _ibvbdim[3];
+    IbvArg _ibvarg[%kargc%], *_ibvargp;
+    RCargs _rcargs;
+    RCarg _rcarg[%kargc%], *_rcargp;
+    RCdim3 _gdimrc, _bdimrc;
+    int _off = 0;
+    int _rcargc = 0;
+    void *_devptr;
+    _rcargs.RCargs_val = _rcarg;
+    _rcargs.RCargs_len = _narg;
+    static char mangledname_[512] = {0,};
+    if (!mangledname_[0]) {
+        if (%mangle%) {
+          dscudaGetMangledFunctionName(mangledname_, __PRETTY_FUNCTION__, Ptxdata);
+        }
+        else {
+          char buf_[256];
+          sprintf(buf_, "%s", __FUNCTION__);
+          strcpy(mangledname_, buf_ + strlen("dscuda")); // obtain original function name.
+        }
+        WARN(3, "mangled name : %s\n", mangledname_);
+    }
+
+    if (dscudaRemoteCallType() == RC_REMOTECALL_TYPE_IBV) {
+END_OF_PRETMP
+
+
+
+  posttmp = <<-'END_OF_POSTTMP'
+        _gdimrc.x = _gdim.x; _gdimrc.y = _gdim.y; _gdimrc.z = _gdim.z;
+        _bdimrc.x = _bdim.x; _bdimrc.y = _bdim.y; _bdimrc.z = _bdim.z;
+        rpcDscudaLaunchKernelWrapper(dscudaLoadModule("%ptxfile%", Ptxdata), %kid%, mangledname_,
+                                 _gdimrc, _bdimrc, _smemsize, (RCstream)_stream,
+                                 _rcargs);
+    }
+}
+END_OF_POSTTMP
+
+  argptmp = <<-'END_OF_ARGPTMP'
+
+        // a pointer to a device-address '%argname%'.
+        _rcargp = &(_rcargs.RCargs_val[_rcargc++]);
+        _devptr = (void*)(size_t)%argname%;
+        ALIGN_UP(_off, __alignof(_devptr));
+        _rcargp->val.type = dscudaArgTypeP;
+        _rcargp->offset = _off;
+        _rcargp->val.RCargVal_u.address = (RCadr)_devptr;
+        _rcargp->size = sizeof(_devptr);
+        _off += _rcargp->size;
+END_OF_ARGPTMP
+
+  argftmp = <<-'END_OF_ARGFTMP'
+
+        // a float '%argname%'.
+        _rcargp = &(_rcargs.RCargs_val[_rcargc++]);
+        ALIGN_UP(_off, __alignof(float));
+        _rcargp->val.type = dscudaArgTypeF;
+        _rcargp->offset = _off;
+        _rcargp->val.RCargVal_u.valuef = %argname%;
+        _rcargp->size = sizeof(float);
+        _off += _rcargp->size;
+END_OF_ARGFTMP
+
+  argitmp = <<-'END_OF_ARGITMP'
+
+        // an integer '%argname%'.
+        _rcargp = &(_rcargs.RCargs_val[_rcargc++]);
+        ALIGN_UP(_off, __alignof(int));
+        _rcargp->val.type = dscudaArgTypeI;
+        _rcargp->offset = _off;
+        _rcargp->val.RCargVal_u.valuei = %argname%;
+        _rcargp->size = sizeof(int);
+        _off += _rcargp->size;
+END_OF_ARGITMP
+
+  argvtmp = <<-'END_OF_ARGVTMP'
+
+        // a variable '%argname%' of type '%argtype%'.
+        _rcargp = &(_rcargs.RCargs_val[_rcargc++]);
+        ALIGN_UP(_off, __alignof(%argtype%));
+        _rcargp->val.type = dscudaArgTypeV;
+        _rcargp->offset = _off;
+        memcpy(_rcargp->val.RCargVal_u.valuev, (char*)&%argname%, sizeof(%argtype%));
+        _rcargp->size = sizeof(%argtype%);
+        _off += _rcargp->size;
+END_OF_ARGVTMP
+
+
+  posttmpibv = <<-'END_OF_POSTTMP_IBV'
+        _ibvgdim[0] = _gdim.x; _ibvgdim[1] = _gdim.y; _ibvgdim[2] = _gdim.z;
+        _ibvbdim[0] = _bdim.x; _ibvbdim[1] = _bdim.y; _ibvbdim[2] = _gdim.z;
+#if !RPC_ONLY
+        ibvDscudaLaunchKernelWrapper(dscudaLoadModule("%ptxfile%", Ptxdata), %kid%, mangledname_,
+                                 _ibvgdim, _ibvbdim, _smemsize, (RCstream)_stream,
+                                 _narg, _ibvarg);
+#endif
+    }
+    else {
+END_OF_POSTTMP_IBV
+
+  argptmpibv = <<-'END_OF_ARGPTMP_IBV'
+
+        // a pointer to a device-address '%argname%'.
+        _ibvargp = _ibvarg + _rcargc;
+        _rcargc++;
+        _devptr = (void*)(size_t)%argname%;
+        ALIGN_UP(_off, __alignof(_devptr));
+        _ibvargp->type = dscudaArgTypeP;
+        _ibvargp->offset = _off;
+        _ibvargp->val.pointerval = (RCadr)_devptr;
+        _ibvargp->size = sizeof(_devptr);
+        _off += _ibvargp->size;
+
+END_OF_ARGPTMP_IBV
+
+  argftmpibv = <<-'END_OF_ARGFTMP_IBV'
+
+        // a float '%argname%'.
+        _ibvargp = _ibvarg + _rcargc;
+        _rcargc++;
+        ALIGN_UP(_off, __alignof(float));
+        _ibvargp->type = dscudaArgTypeF;
+        _ibvargp->offset = _off;
+        _ibvargp->val.floatval = %argname%;
+        _ibvargp->size = sizeof(float);
+        _off += _ibvargp->size;
+
+END_OF_ARGFTMP_IBV
+
+  argitmpibv = <<-'END_OF_ARGITMP_IBV'
+
+        // an integer '%argname%'.
+        _ibvargp = _ibvarg + _rcargc;
+        _rcargc++;
+        ALIGN_UP(_off, __alignof(int));
+        _ibvargp->type = dscudaArgTypeI;
+        _ibvargp->offset = _off;
+        _ibvargp->val.intval = %argname%;
+        _ibvargp->size = sizeof(int);
+        _off += _ibvargp->size;
+
+END_OF_ARGITMP_IBV
+
+  argvtmpibv = <<-'END_OF_ARGVTMP_IBV'
+
+        // a variable '%argname%' of type '%argtype%'.
+        _ibvargp = _ibvarg + _rcargc;
+        _rcargc++;
+        ALIGN_UP(_off, __alignof(%argtype%));
+        _ibvargp->type = dscudaArgTypeV;
+        _ibvargp->offset = _off;
+
+        _ibvargp->val.intval = %argname%;
+        memcpy(_ibvargp->val.customval, (char*)&%argname%, sizeof(%argtype%));
+        _ibvargp->size = sizeof(%argtype%);
+        _off += _ibvargp->size;
+
+END_OF_ARGVTMP_IBV
+
+  srcstr, dststr = skip_ptxdata(srcstr)
+
+  kdefs.each { |kdef|
+    kstr = ''
+    # preamble
+    kstr << "\n"
+    kstr << "/*\n"
+    kstr << " * stub for remote call to #{kdef[:name]}.\n"
+    kstr << " */\n"
+    str = kdef[:template] ? kdef[:template] + ' ' : ''
+    str += pretmp
+    str = str.gsub(/%kname%/, "#{kdef[:name]}")
+    if kdef[:arg] =~ / \A \s* \z /xms
+      str = str.gsub(/%kargs%/, '') # kernel has no arg.
+    else
+      str = str.gsub(/%kargs%/, ", #{kdef[:arg]}")
+    end
+    str = str.gsub(/%kargc%/, "#{kdef[:argnames].size}")
+    str = str.gsub(/%ptxfile%/, ptxfile)
+    str = str.gsub(/%mangle%/, kdef[:extc] ? '0' : '1')
+
+    kstr << str
+
+    # arguments for IB Verb
+    argtypes = kdef[:argtypes].dup
+    kdef[:argnames].each { |argname|
+      argtype = argtypes.shift
+      case argtype
+      when /\A dscudaArgTypeP \z/x
+        str = argptmpibv
+        str = str.gsub(/%argname%/, "dscudaAdrOfUva(#{argname})")
+      when /\A dscudaArgTypeF \z/x
+        str = argftmpibv
+        str = str.gsub(/%argname%/, argname)
+      when /\A dscudaArgTypeI \z/x
+        str = argitmpibv
+        str = str.gsub(/%argname%/, argname)
+      else # custom type
+        str = argvtmpibv
+        str = str.gsub(/%argname%/, argname)
+        str = str.gsub(/%argtype%/, argtype)
+      end
+      kstr << str
+    }
+
+    # postamble for IB Verb
+    str = posttmpibv
+    str = str.gsub(/%ptxfile%/, ptxfile)
+    str = str.gsub(/%kname%/, "#{kdef[:name]}")
+    str = str.gsub(/%kid%/, "#{kdef[:id]}")
+    kstr << str
+
+    # arguments for RPC
+    argtypes = kdef[:argtypes].dup
+    kdef[:argnames].each { |argname|
+      argtype = argtypes.shift
+      case argtype
+      when /\A dscudaArgTypeP \z/x
+        str = argptmp
+        str = str.gsub(/%argname%/, "dscudaAdrOfUva(#{argname})")
+      when /\A dscudaArgTypeF \z/x
+        str = argftmp
+        str = str.gsub(/%argname%/, argname)
+      when /\A dscudaArgTypeI \z/x
+        str = argitmp
+        str = str.gsub(/%argname%/, argname)
+      else # custom type
+        str = argvtmp
+        str = str.gsub(/%argname%/, argname)
+        str = str.gsub(/%argtype%/, argtype)
+      end
+      kstr << str
+    }
+    extc = kdef[:name]
+
+    # postamble for RPC
+    str = posttmp
+    str = str.gsub(/%ptxfile%/, ptxfile)
+    str = str.gsub(/%kname%/, "#{kdef[:name]}")
+    str = str.gsub(/%kid%/, "#{kdef[:id]}")
+    kstr << str
+
+    # insert it just before the original prototype or the original definition.
+    cudaKernelRe2 = %r{
+                        (?: template \s* <[^>]*> \s+ )*
+                        (?: extern \s* "C" \s+ )*
+                        \b (?: \s* static \s+)*
+                        __global__ \s+
+                        (?: \s* \w+ \b | \s* \* )* \s* #{kdef[:name]} \s*
+                      }xms
+
+    # note that it should be inserted only once, and thus do not use #gsub method but #sub.
+#    srcstr = srcstr.sub(cudaKernelRe2) { "#{$1} #{kstr}\n"}
+
+    srcstr = srcstr.sub(cudaKernelRe2) { "#{kstr} #{$&}"} # !!!
+
+  } # kdefs.each
+
+  # remove __global__ modifier. otherwise nvcc try to setup code for kernel launch,
+  # causing unwanted reference to cudaSetUpArgs etc.
+  srcstr = srcstr.gsub(/__global__/) { '' }
+
+  dststr += srcstr
+
+  return dststr
+end
+
+toplevel

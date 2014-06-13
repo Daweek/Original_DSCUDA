@@ -1,0 +1,15 @@
+EXECUTABLE      = 
+CUFILES         = 
+CCFILES         = 
+CFILES          =
+CU_DEPS         = 
+
+COMMONFLAGS    +=
+NVCCFLAGS      += 
+CXXFLAGS       +=
+CFLAGS         +=
+LDFLAGS        +=
+
+RCUDA_PATH      ?= ../../../..
+
+include $(RCUDAPATH)/misc/cudasdk.mk

@@ -1,0 +1,5 @@
+export RCUDA_PATH=/root/rcudapkg2.1.0
+export RCUDA_WARNLEVEL=2
+export LD_LIBRARY_PATH=/root/rcudapkg2.1.0/lib:$LD_LIBRARY_PATH
+export RCUDA_SERVER=gpu16ib
+

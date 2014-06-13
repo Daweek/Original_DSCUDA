@@ -1,0 +1,1011 @@
+\documentclass[12pt]{jarticle}
+
+\usepackage{graphicx}
+
+% \oddsidemargin -10mm
+% \evensidemargin -10mm
+% \textwidth 180mm
+
+\oddsidemargin 0mm
+\evensidemargin 0mm
+\topmargin -10mm
+\textwidth 160mm
+\textheight 230mm
+
+\newcommand{\Vec}[1]{\mbox{$\vec{#1}$}}
+
+\newcommand{\Section}[1]{\section{\textmd{\textgt{\textsf{#1}}}}}
+\newcommand{\Subsection}[1]{\subsection{\textmd{\textgt{\textsf{#1}}}}}
+\newcommand{\Subsubsection}[1]{\subsubsection{\textmd{\textgt{\textsf{#1}}}}}
+
+% #1:width(mm), #2:.eps, #3:caption
+
+\newcommand{\FigureL}[3]{
+\vspace*{7mm}
+\begin{minipage}{140mm}
+\includegraphics[width= #1 mm]{#2}\\
+{#3}\\[5mm]
+\end{minipage}
+}
+\newcommand{\Figure}[3]{
+\begin{center}
+\FigureL{#1}{#2}{#3}
+\end{center}
+}
+
+\newcounter{bibno}
+\newcommand{\mycite}[1]{[\ref{bib:#1}]}
+\newcommand{\mybibitem}[2]{
+  \refstepcounter{bibno}
+  \label{bib:#1}
+  \noindent
+  [\thebibno]
+  \begin{minipage}[t]{150mm}
+  #2
+  \end{minipage}
+  \vskip 5mm
+}
+
+\begin{document}
+
+\gtfamily
+\sffamily
+
+\thispagestyle{empty}
+
+% \mcfamily
+% \rmfamily
+
+\vspace*{40mm}
+\begin{center}
+{\Huge Remote CUDA ソフトウェアパッケージ\\[3mm]
+ユーザガイド}\\[10mm]
+
+\vspace*{5mm}
+{\LARGE for Remote CUDA version 2.0.0}\\
+
+\vspace*{10mm}
+{\large 最終更新 : 2011 年 2 月 26日
+}
+\end{center}
+
+\bigskip
+
+\vfill
+
+%
+\hfill
+\begin{minipage}{80mm}
+    {\large
+      \includegraphics[width=70mm]{kfcrlogo.eps}\\[3mm]
+      ~~株式会社 K \& F Computing Research\\
+      ~~E-mail: support@kfcr.jp
+    }
+\end{minipage}
+
+\clearpage
+
+\vspace*{-3mm}
+\tableofcontents
+
+\clearpage
+
+\Section{本文書の概要}
+
+この文書では Remote CUDA ソフトウェアパッケージの使用方法を説明します。
+%
+Remote CUDA は PC の I/O スロットに接続された NVIDIA 社製 GPU カー
+ド(CUDA デバイス) を、ネットワーク接続された他の PC から GPGPU としてシー
+ムレスに使用するためのソフトウェア環境です。本バージョンは CUDA バージョ
+ン 3.2 に対応しています。
+
+以降、第 \ref{sec:overview} 章では Remote CUDA の基本構成と動作概要を説
+明します。第 \ref{sec:install} 章では Remote CUDA ソフトウェアパッケー
+ジ (以降「本パッケージ」と呼びます) のインストール方法を説明します。第
+\ref{sec:rcudacc} 章ではアプリケーションプログラムのコンパイル方法、実行
+方法について説明します。第 \ref{sec:raia} 章では拡張機能である
+冗長計算機能について説明します。第 \ref{sec:perf} 章は実効性能の測定値を示しま
+す。第 \ref{sec:rcudainside} 章では Remote CUDA の実装や内部動作につい
+て触れます。
+
+なお以降では、本パッケージのルートディレクトリ ({\tt /{\it パッケージを
+    展開したディレクトリ}/rcudapkg{\it バージョン番号}/}) を {\tt
+  \$rcudapkg} と表記します。
+
+\Section{Remote CUDA 概観}\label{sec:overview}
+
+本節では Remote CUDA の基本構成と機能を概観します。
+
+\Subsection{ハードウェアの構成}
+
+Remote CUDA を使用する典型的なシステム構成の例として、下図に示すシステ
+ムを考えます。特に記載の無い限り、以降の説明はこのシステムを対象とする
+ものとします。
+\vspace*{-7mm}
+%
+\Figure{140}{system.eps}
+{図 : Remote CUDA を利用するシステムの例。}
+%
+\vspace*{-5mm}
+このシステムは互いにネットワーク接続された 2 台の PC か
+ら成ります。簡便のため、一方の PC をローカルホストと呼び、他方をリモー
+トホストと呼ぶことにします。ネットワーク接続には原則として InfiniBand
+(10Gb/s $\times$ 2 ポート) を想定します。ただし TCP/IP による通信が可能
+な接続であれば、必ずしも InfiniBand である必要はありません。
+
+リモートホストには 1 枚の GPU カードが接続されているものとし、これを リ
+モート GPU と呼ぶことにします。リモート GPU は NVIDIA 社製の CUDA に対
+応した製品であることが必須です。
+
+\Subsection{ソフトウェアの構成}
+
+Remote CUDA はユーザに対し、サーバ・クライアント型の実行環境を提供しま
+す。すなわち、リモートホスト上ではサーバプログラム {\tt rcudasrv} を常時
+稼働させておき、ローカルホスト上のユーザプログラムを {\tt rcudasrv} に対
+するクライアントとして実行します。サーバプログラムはユーザプログラムの
+要求に従ってリモート GPU を制御します。
+\vspace*{-7mm}
+%
+\Figure{140}{softlayer.eps}
+{図 : ソフトウェア構成}
+%
+クライアント・サーバ間の通信プロトコルには TCP/IP を用います。通信 API
+には BSD Socket を使用します。BSD Socket のラッパーとして Remote
+Procedure Call (RPC) を、さらにその上位のラッパーとして本パッケージの提
+供する Remote CUDA ライブラリ を使用します。サーバによる GPU の制御は、NVIDIA
+社の提供する CUDA Runtime API (一部 CUDA Driver API) を介して行われます。
+
+\Subsection{クライアントプログラムの生成}
+
+CUDA を使用するユーザアプリケーション (つまりリモートホストではなくロー
+カルホストに接続された GPU を使用するアプリケーション) のソースコードを、
+本パッケージの提供する Remote CUDA コンパイラ {\tt rcudacc} を用いてコ
+ンパイルすることにより、Remote CUDA クライアントが生成されます。つまり
+ユーザは、リモートホストに接続された GPU を使用する場合にも、ローカル向
+けに記述したソースコードをそのまま使用できます。\vspace*{-7mm}
+%
+\Figure{140}{rcudacc.eps} {図 : {\tt rcudacc} はローカル GPU 向けのソー
+  スコードからリモート GPU 向けのクライアントを生成する。}
+%
+
+\Subsection{冗長計算機能}
+
+本章では簡単のため説明を省きましたが、
+Remote CUDA は冗長計算機能をサポートしています。
+つまり、複数のリモート GPU 上で同一の計算を実行し、
+両者の結果が異なっていた場合には、
+その旨をユーザアプリケーションに通知することが可能です。
+この機能の使用方法については第\ref{sec:raia}章を参照してください。
+
+\clearpage
+\Section{インストール}\label{sec:install}
+
+\Subsection{準備}
+
+本パッケージは以下のソフトウェアに依存しています。
+インストール作業の前に、これらの動作環境を整えて下さい。
+
+\begin{itemize}
+
+\item CUDA 開発ツール (CUDA 2.2 以降を推奨)\\
+{\tt http://www.nvidia.com/}
+
+\item C++ コンパイラ (g++ version 4.1.0 以降を推奨)\\
+{\tt http://gcc.gnu.org/}
+
+\item Ruby (version 1.8.5 以降を推奨)\\
+{\tt http://www.ruby-lang.org/}
+
+\end{itemize}
+%
+
+\noindent
+注意 : コンパイル対象とするアプリケーションプログラムが CUDA カーネル
+を C++ テンプレートとして実装している場合には、C++ コンパイラには
+g++ version 4.0.0 以上を使用してください。
+それ以前のバージョンや、Intel C++ コンパイラ等では動作しません。
+これは C++ テンプレートからシンボル名を生成する際の name mangling
+規則がコンパイラごとに異なっており、
+Remote CUDA では現在のところ g++ version 4 系の name mangling
+規則のみをサポートしているためです。
+
+\Subsection{パッケージの展開}
+
+ソフトウェアパッケージ {\tt rcudapkg{\it n}.tar.gz} を展開してくださ
+い ({\it n} はバージョン番号)。パッケージには以下のファイルが含まれて
+います:
+
+\vspace*{3mm}
+\begin{tabular}{ll}
+  doc/                      & 本文書、その他のドキュメント。\\
+  scripts/                  & パッケージ管理ユーティリティ。\\
+  bin/                      & \\
+  ~~~~rcudacc               & .cu ファイルから Remote CUDA クライアントを生成する\\
+                            & コンパイラ。\\
+  ~~~~rcudasvr              & Remote CUDA サーバ。\\
+  ~~~~rcudalaunch           & Remote CUDA サーバ起動スクリプト。\\
+  ~~~~ptx2symbol            & CUDA カーネルの name mangling されたシンボル名を取得\\
+                            & するスクリプト。{\tt librcuda.a} が使用します。\\
+  ~~~~rcudatest             & Remote CUDA 動作テスト用クライアント。\\
+  include/                  & ヘッダファイル (Remote CUDA クライアント・サーバ共用)。\\
+  lib/                      & \\
+  ~~~~librcuda.a            & Remote CUDA ライブラリ。\\
+  src/                      & Remote CUDA サーバ、ライブラリのソースコード。\\
+  misc/                     & サーバ構成指定ファイル、make ファイルのサンプル等。\\
+  sample/                   & アプリケーションプログラムの例。\\
+  NVIDIA\_GPU\_Computing\_SDK3.2 & Remote CUDA 用 make ファイルを追加した CUDA 3.2 SDK。\\
+\end{tabular}\\
+
+\Subsection{環境変数の設定}
+
+以下の環境変数を設定してください。
+
+\vspace*{3mm}
+\begin{tabular}{ll}
+  CUDAPATH          : & CUDA Toolkit のインストールされているパス。\\
+                      & デフォルト値は {\tt /usr/local/cuda}\\[3mm]
+  CUDASDKPATH       : & CUDA SDK のインストールされているパス。\\
+                      & デフォルト値は {\tt /usr/local/cuda/NVIDIA\_GPU\_Computing\_SDK}\\[3mm]
+  RCUDA\_PATH       : & Remote CUDA ソフトウェアパッケージのインストールされて\\
+                      & いるパス。設定必須。デフォルト値はありません。\\[3mm]
+  LD\_LIBRARY\_PATH : & 共有ライブラリパスに {\tt \$RCUDA\_PATH/lib} を追加してください。\\
+                      & 設定必須。\\[3mm]
+  RCUDA\_SERVER     : & Remote CUDA サーバが動作している PC の IP アドレス、\\
+                      & あるいはホスト名。デフォルト値は {\tt localhost}\\[3mm]
+  RCUDA\_SERVER\_CONF : & Remote CUDA サーバの設定ファイル。冗長計算機能を使用する\\
+                      & 際に、スクリプト{\tt \$rcudapkg/bin/rcudalaunch} が参照します。\\
+                      & {\tt rcudalaunch} を用いない場合には設定は不要です。\\
+                      & デフォルト値は {\tt \$RCUDA\_PATH/misc/server.conf}\\[3mm]
+  RCUDA\_WARNLEVEL  : & Remote CUDA サーバおよびクライアント実行時のメッセージ\\
+                      & 出力レベル。整数値を指定します。値が大きいほど詳細なメッ\\
+                      & セージが出力されます。デフォルト値は 2。最小値は 0。\\[3mm]
+\end{tabular}
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+例:
+kawai@localhost>export RCUDA_PATH="/home/kawai/src/rcudapkg2.0.0"
+kawai@localhost>export RCUDA_SERVER="192.168.10.101"
+kawai@localhost>export LD_LIBRARY_PATH=/home/kawai/src/rcudapkg2.0.0/lib:\
+$LD_LIBRARY_PATH
+\end{verbatim}
+\end{minipage}\\[3mm]
+
+\noindent
+これらの他に CUDA や C コンパイラが参照する環境変数がある場合には、
+必要に応じてそれらも設定して下さい。
+
+\Subsection{ライブラリ・実行ファイルのビルド}
+
+ディレクトリ {\tt \$rcudapkg/src} へ移動し、{\tt make} を
+実行してください。Remote CUDA ライブラリ {\tt
+  \$rcudapkg/lib/librcuda.a} とRemote CUDA サーバ {\tt
+  \$rcudapkg/bin/rcudasvr}、Remote CUDA テストプログラム{\tt
+  \$rcudapkg/bin/rcudatest} が生成されます。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+kawai@localhost>pwd
+/home/kawai/src/rcuda2.0.0/src
+kawai@localhost>make
+rpcgen -N -l rcudarpc.x > rcudarpc_clnt.c
+rpcgen -N -h rcudarpc.x > rcudarpc.h
+cp rcudarpc_clnt.c rcudarpc_clnt.cu
+...
+ranlib librcuda.a
+c++ -I. -I/usr/local/cuda3.2/cuda/include -I/home/kawai/src/cuda3.2\
+/NVIDIA_GPU_Computing_SDK/C/common/inc -fPIC -shared -o libcudart.so\
+.3 cudart_dummy.c /usr/local/cuda3.2/cuda/bin/nvcc  -g -I. -I/usr/lo\
+cal/cuda3.2/cuda/include -I/home/kawai/src/cuda3.2/NVIDIA_GPU_Comput\
+ing_SDK/C/common/inc -o rcudatest rcudatest.cu -L../lib -lrcuda
+kawai@localhost>
+\end{verbatim}
+\end{minipage}\\[5mm]
+
+以上でインストールは完了です。
+
+\Subsection{動作チェック}
+
+テストプログラム {\tt \$rcudapkg/bin/rcudatest} と、{\tt
+  \$rcudapkg/sample/} 内のサンプルプログラムを使用して、本パッケージの
+動作を確認します。
+
+\Subsubsection{テストプログラム {\tt rcudatest}}
+
+リモートホスト上でサーバ {\tt rcudasvr} を起動し、
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+[root@localhost]# ./rcudasvr  &
+[1] 1234
+server id : 0
+ndevice : 1
+real device       : 0
+virtual device    : 0
+[root@localhost]#
+\end{verbatim}
+\end{minipage}\\[5mm]
+%
+ローカルホスト上でテストプログラムを実行します。引数を与えずに実行すると、使用方法が表示されます。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+kawai@localhost>pwd
+/home/kawai/src/rcuda2.0.0/src
+kawai@localhost>./rcudatest
+usage: ./rcudatest <test_program_ID> [destination_IP_address]
+   0) shows GPU status.
+   1) measure send (local->remote) performance.
+   2) measure receive (local<-remote) performance.
+   3) measure device-memory write (host->GPU) performance.
+   4) measure device-memory read (host<-GPU) performance.
+\end{verbatim}
+\end{minipage}\\[5mm]
+%
+引数に 1 を与えて実行すると、ホストから GPU へのデータ転送速度の測定を行います。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+kawai@localhost>./rcudatest 1
+
+#
+# Raw send (local host -> remote host)
+#
+Client IP address : 192.168.1.2
+4096 byte    4.560770 sec    43.852244 MB/s
+10240 byte    1.978837 sec    101.069478 MB/s
+25600 byte    1.112054 sec    179.847364 MB/s
+64000 byte    0.766354 sec    260.975969 MB/s
+160000 byte    0.486547 sec    411.059986 MB/s
+400000 byte    0.378098 sec    528.963375 MB/s
+1000000 byte    0.330105 sec    605.868146 MB/s
+2500000 byte    0.300943 sec    664.577903 MB/s
+6250000 byte    0.288833 sec    692.441314 MB/s
+kawai@localhost>
+\end{verbatim}
+\end{minipage}\\[5mm]
+%
+引数に 2 を与えると、GPU からホストへのデータ転送速度の測定を行います。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+kawai@localhost>./rcudatest 2
+#
+# Raw receive (local host <- remote host)
+#
+Client IP address : 192.168.1.2
+4096 byte    4.745010 sec    42.149541 MB/s
+10240 byte    2.254493 sec    88.711741 MB/s
+25600 byte    1.336569 sec    149.636861 MB/s
+64000 byte    0.968696 sec    206.463147 MB/s
+160000 byte    0.632387 sec    316.262074 MB/s
+400000 byte    0.482722 sec    414.317105 MB/s
+1000000 byte    0.416788 sec    479.860148 MB/s
+2500000 byte    0.424247 sec    471.423457 MB/s
+6250000 byte    0.432278 sec    462.665317 MB/s
+kawai@localhost>
+\end{verbatim}
+\end{minipage}
+
+\Subsubsection{サンプルプログラム}
+
+{\tt \$rcudapkg/sample/} 内に各種のサンプルプログラムが格納されています。
+
+\begin{itemize}
+\item {\tt vecadd}: ベクトルの加算を行います。
+\item {\tt direct}: 重力多体シミュレーションを行います
+({\tt make run} で初期条件を生成し、シミュレーション実行します)。
+\item {\tt claret}: 溶融塩のシミュレーションを行います。
+\end{itemize}
+%
+各ディレクトリ内で {\tt make} を実行すると、それぞれの Remote CUDA クラ
+イアントが生成されます。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+kawai@localhost>pwd
+/home/kawai/src/rcuda2.0.0/sample/claret
+kawai@localhost>make
+cc -DVTGRAPE -O -ffast-math -funroll-loops  -o sockhelp.o -c sockhelp.c
+../../bin/rcudacc -o mr3.o -I. -I/usr/local/cuda/include \
+  -I/usr/local/cuda/NVIDIA_CUDA_SDK/common/inc -c -use_fast_math \
+  -O -i mr3.cu 
+Info    : verbose:2
+Info    : infile:mr3.cu
+Info    : ptxfile:mr3.cu.ptx
+...
+cc -DVTGRAPE -O -ffast-math -funroll-loops  -I/home/kawai/src/cuda3.2/\
+NVIDIA_GPU_Computing_SDK/shared/inc cras36.c -o cras_gpu sockhelp.o mr\
+3.o /home/kawai/src/cuda3.2/NVIDIA_GPU_Computing_SDK/C/lib/libcutil_x8\
+6_64.a -L/usr/local/cuda3.2/cuda/lib64 -L../../lib -lcudart -L/\
+usr/local/lib -lglut -lGL -lGLU -lm -lstdc++ -lrcuda
+kawai@localhost>
+\end{verbatim}
+\end{minipage}
+
+\Subsubsection{CUDA SDK サンプルプログラム}
+
+{\tt \$rcudapkg/NVIDIA\_GPU\_Computing\_SDK3.2/C/src/} 内に、NVIDIA 社の提供する
+CUDA SDK 3.2 に含まれている各種のサンプルプログラムのうち、グラフィクス関連の
+CUDA API を用いないものすべてが含まれています (全 56 種)。
+
+各サンプルプログラムのディレクトリ内には、Remote CUDA 用の make ファイ
+ルが {\tt Makefile.rcuda} というファイル名で用意されています。各ディレ
+クトリ内で {\tt make -f Makefile.rcuda} を実行すると、それぞれ
+の Remote CUDAクライアントが生成されます。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+kawai@localhost>pwd
+/home/kawai/src/rcuda2.0.0/NVIDIA_GPU_Computing_SDK3.2/C/src/reduction
+kawai@localhost>make -f Makefile.rcuda
+echo objs reduction_kernel.cu.o reduction.cpp.o      
+objs reduction_kernel.cu.o reduction.cpp.o
+echo src reduction_kernel.cu
+src reduction_kernel.cu
+/home/kawai/src/rcuda2.0.0/bin/rcudacc -o reduction_kernel.cu.o  --ptxa
+...
+/usr/local/cuda3.2/cuda/bin/nvcc  --compiler-options -fPIC -m64 -o redu\
+ction -L/home/kawai/src/rcuda2.0.0/lib -L/home/kawai/src/cuda3.2/NVIDIA\
+_GPU_Computing_SDK/C/lib -L/home/kawai/src/cuda3.2/NVIDIA_GPU_Computing\
+_SDK/shared/lib reduction_kernel.cu.o reduction.cpp.o -lrcuda -lshrutil\
+_x86_64 -lcutil_x86_64
+kawai@localhost>
+\end{verbatim}
+\end{minipage}\\[5mm]
+
+なお全 56 種のうち、以下に示す 8 種のプログラムは Remote CUDA では動作しません。
+残り 48 種については動作確認済みです。
+
+\begin{itemize}
+
+\item transpose :
+このサンプルプログラム中では、以下に示すように、
+CUDA カーネルを関数ポインタ経由で呼び出しています。
+Remote CUDA はこのような記述を扱えません。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+    void (*kernel)(float *, float *, int, int, int);
+    ...
+    kernel = &copySharedMem;
+    ...
+    kernel<<<grid, threads>>>(d_odata, d_idata, size_x, size_y, 1);
+\end{verbatim}
+\end{minipage}
+
+\item 下表に示す 7 種のサンプルプログラムは、
+CUDA Toolkit の提供するライブラリを使用しています。
+これらのライブラリはその内部からリモート化されていない CUDA カーネルを呼び出しています。
+そのためこれらのサンプルプログラムを Remote CUDA を用いてコンパイルしても、正しく動作しません。
+
+\begin{center}
+\begin{tabular}{ll}
+\hline
+サンプルプログラム名              & 依存するライブラリ \\
+\hline
+\hline
+\tt conjugateGradient             & \tt libcublas.so\\
+\tt convolutionFFT2D              & \tt libcufft.so\\
+\tt simpleCUFFT                   & \tt libcufft.so\\
+\tt MonteCarloCURAND/EstimatePiQ  & \tt libcurand\\
+\tt MonteCarloCURAND/EstimatePiP  & \tt libcurand\\
+\tt lineOfSight                   & \tt libcudpp\_x86\_64\\
+\tt radixSort                     & \tt libcudpp\_x86\_64\\
+\hline
+\end{tabular}
+\end{center}
+
+
+\end{itemize}
+
+\Section{Remote CUDA コンパイラ {\tt rcudacc} の使用方法}\label{sec:rcudacc}
+
+CUDA 拡張 C 言語で記述されたユーザアプリケーションのソースコード (以下
+{\tt .cu} ファイルと表記します) から Remote CUDA クライアントを生成する
+には、Remote CUDA コンパイラ {\tt \$rcudapkg/bin/rcudacc} を使用します。
+
+{\tt rcudacc} を引数を与えずに実行すると、使用方法が表示されます。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+kawai@localhost>pwd
+/home/kawai/src/rcuda2.0.0/sample/direct
+kawai@localhost>../../bin/rcudacc
+No input file given.
+  usage: ../../bin/rcudacc [options] inputfile(s)...
+  options:
+      --infile <file>   : a .cu input file.
+      -i <file>
+
+      -o <file>         : an output file.
+
+      --verbose[=level] : be verbose. the level can optionally be given. [2]
+      -v[level]           the higher level gives the more verbose messages. \
+  level 0 for silence.
+
+      --help            : print this help.
+      -h
+  Note that all options not listed above are implicitly passed on to nvcc.
+
+\end{verbatim}
+\end{minipage}\\[5mm]
+%
+{\tt rcudacc} へ {\tt .cu} ファイルを与えるには、オプションスイッチ {\tt -i }
+を使用します。また、生成される Remote CUDA クライアントは、オ
+プションスイッチ {\tt -o} で指定します。その他の入力ファイル ({\tt .o}
+や {\tt .c} など) はオプションスイッチ無しにファイル名だけを引数として
+与えます。これら以外のすべての引数やオプションスイッチは、{\tt
+  rcudacc} では解釈されずに、{\tt rcudacc} が内部的に起動する {\tt
+  nvcc} へと渡されます。{\tt nvcc} が必要とする引数は、すべて {\tt
+  rcudacc} への引数として渡さねばなりません。また、クライアントは
+Remote CUDA ライブラリを使用するため、引数 {\tt -lrcuda} を与えて
+これをリンクする必要があります。
+
+\vspace*{5mm}
+例えば、本パッケージ付属のサンプルプログラム {\tt \$rcudapkg/vecadd/} の
+クライアント {\tt userapp} を生成するには、下記の引数が必要です。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+kawai@localhost>pwd
+/home/kawai/src/rcuda2.0.0/sample/vecadd
+kawai@localhost>../../bin/rcudacc -o userapp -I. -i userapp.cu -lrcuda
+\end{verbatim}
+\end{minipage}\\[5mm]
+%
+
+\vspace*{15mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt
+%\baselineskip=14pt \lineskiplimit=-\maxdimen
+
+参考 : {\tt rcudacc} は以下の C プリプロセッサマクロ定数を定義します。
+定数はソースコード中で参照できます。\\
+
+\begin{center}
+\begin{tabular}{ll}
+\hline
+定数名                               & 値 \\
+\hline
+\hline
+{\tt \_\_RCUDA\_\_}                  & 1 \\
+{\tt \_\_RCUDACC\_VERSION\_\_}       & バージョン番号 \\
+                                     & (例 : バージョン 1.2.3 の値は 0x010203) \\
+\hline
+\end{tabular}\\
+\end{center}
+
+\end{minipage}\\[5mm]
+%
+
+\clearpage
+
+\Section{冗長計算機能 の使用方法}\label{sec:raia}
+
+Remote CUDA は冗長計算機能をサポートしています。
+つまり、複数のリモート GPU 上で同一の計算を実行し、
+両者の結果が異なっていた場合には、
+その旨をユーザアプリケーションに通知することが可能です。
+この章では冗長計算機能の使用方法を説明します。
+
+\Subsection{リモートホスト側の設定}
+
+説明に用いるリモートシステムの例として、下図に示すものを考えます。
+\vspace*{-7mm}
+%
+\Figure{100}{system2.eps}
+{図 : 複数の GPU を持つリモートシステムの例。}
+%
+\vspace*{-5mm} 
+
+Remote CUDA はリモートホスト上に搭載された複数の GPU を
+いくつかのグループに分割して管理します。
+このグループのことを「GPU クラスタ」と呼ぶことにします。
+そして各 GPU クラスタにはユニークな非負整数値「GPU クラスタ ID」
+を割り当てるこにします。
+
+GPU クラスタと Remote CUDA サーバは 1 対 1 に対応します。
+つまり、ひとつの GPU クラスタは、ひとつの Remote CUDA サーバによって制御されます。
+ひとつのリモートホストに複数の GPU クラスタが接続されている場合、
+そのリモートホスト上には複数の Remote CUDA サーバを稼働させることが可能です。
+
+上図のシステムでは、ひとつのリモートホストに 6 つの GPU が接続されています。
+例えばこれらの GPU を 3 枚ずつの GPU クラスタにまとめ、
+それぞれを別個の Remote CUDA サーバに管理させられます。
+
+各 Remote CUDA サーバへの GPU の割り当ては、
+Remote CUDA サーバの起動時にコマンドライン引数で次のように指定します:
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\tt
+rcudasvr -c {\it cluster\_id} -d '{\it device\_id\_list}'
+
+\end{minipage}\\[5mm]
+%
+ここで {\it cluster\_id} は Remote CUDA サーバが管理する GPU クラスタの ID です。
+任意のユニークな非負整数値を指定できます。{\it device\_id\_list} はその
+GPU クラスタに属する GPU のデバイス番号を、空白で区切って並べたリストです。
+デバイス番号とは、各 GPU に CUDA が割り当てる整数値です。
+リモートホストに $n$ 個の GPU が接続されている場合、
+各 GPU には 0 から $n-1$ までのいずれかの値がユニークに割り当てられます。
+
+上図のように 6 枚の GPU を 3 枚ずつ 2 つの GPU クラスタにまとめて管理するには、
+2 つの Remote CUDA サーバを次のように起動します。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+[root@localhost]# ./rcudasvr -c 0 -d '0 1 2' &
+[1] 1234
+server id : 0
+ndevice : 3
+real device       : 0 1 2
+virtual device    : 0 1 2
+[root@localhost]# ./rcudasvr -c 1 -d '3 4 5' &
+[2] 1235
+server id : 1
+ndevice : 3
+real device       : 3 4 5
+virtual device    : 0 1 2
+\end{verbatim}
+\end{minipage}\\[5mm]
+%
+
+クラスタ構成をあらかじめ設定ファイルに記述しておけば、
+Remote CUDA サーバ起動時の操作を簡略化できます。
+設定ファイルの書式は次の通りです。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\tt
+{\it cluster\_id} : {\it device\_id\_list}\\
+{\it cluster\_id} : {\it device\_id\_list}\\
+...
+\end{minipage}\\[5mm]
+%
+
+例えば前述の例の GPU クラスタ構成は、以下のように記述します\\
+(C++ 形式のコメントを挿入できます)。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+// clusterID : deviceID0 deviceID1 ...
+0 : 0 1 2  // the 1st cluster
+1 : 3 4 5  // the 2nd cluster
+\end{verbatim}
+\end{minipage}\\[5mm]
+%
+
+設定ファイル名を環境変数 {\tt RCUDA\_SERVER\_CONF} で指定し、
+{\tt \$rcudapkg/bin/rcudalaunch} を実行すると、
+設定にしたがって {\tt rcudasvr} が起動されます。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+[root@localhost]# export RCUDA_SERVER_CONF="./server.conf"
+[root@localhost]# cat server.conf
+// clusterID : deviceID0 deviceID1 ...
+0 : 0 1 2  // the 1st cluster
+1 : 3 4 5  // the 2nd cluster
+[root@localhost]# ./rcudalaunch 
+RCUDA server configuration : [{:svrid=>"0", :devids=>["0 1 2"]},\
+{:svrid=>"1", :devids=>["3 4 5"]}]
+./rcudasvr -c 0 -d '0 1 2' &
+./rcudasvr -c 1 -d '3 4 5' &
+server id : 0
+ndevice : 3
+real devices      : 0 1 2
+virtual devices   : 0 1 2
+
+server id : 1
+ndevice : 3
+real devices      : 3 4 5
+virtual devices   : 0 1 2
+[root@localhost]#
+\end{verbatim}
+\end{minipage}\\[5mm]
+%
+
+\Subsection{ローカルホスト側の設定}
+
+ローカルホスト上のクライアントから特定のサーバ、つまり特定の GPU クラスタへアクセスするには、
+リモートホストの IP アドレスと GPU クラスタ ID の組を環境変数 {\tt RCUDA\_SERVER} に指定します:\\
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+書式:\\
+\tt {\it ip\_address}:{\it cluster\_id}
+\end{minipage}\\
+
+ローカルホストから個々の GPU へアクセスするには、
+実際のデバイス ID ではなく、Remote CUDA によって設定される
+仮想的なデバイス ID を用います。
+指定した GPU クラスタに $n$ 個の GPU が属している場合、
+これらの GPU には 0 から $n-1$ までの仮想デバイス ID が割り当てられます。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+例:
+kawai@localhost>export RCUDA_SERVER="192.168.10.101:0"
+\end{verbatim}
+\end{minipage}\\[3mm]
+
+空白で区切って複数の GPU クラスタを指定すると、
+それらのクラスタを用いて冗長計算が行われます
+(最大 4 個のクラスタを指定できます)。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+例:
+kawai@localhost>export RCUDA_SERVER="192.168.10.101:0 192.168.10.101:1"
+\end{verbatim}
+\end{minipage}\\[3mm]
+
+つまり各 GPU クラスタ上で同一の計算が実行され、
+それらの結果が一致するかどうかがローカルホスト上で検証されます。
+一致しなかった場合にはエラーハンドラが呼び出されます。
+エラーハンドラはアプリケーションプログラム内であらかじめ設定しておきます。
+設定には RCUDA の提供する API、{\tt rcudaSetErrorHandler()} を用います。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+書式:\\
+\tt
+void rcudaSetErrorHandler(void (*{\it handler})(void *), void *{\it handler\_arg})\\
+\end{minipage}\\
+
+引数 {\it handler} に、エラーハンドラへのポインタを渡します。
+エラーハンドラは {\tt void *} 型の引数をひとつ取れます。
+この引数を引数 {\it handler\_arg} として与えます。
+引数が不要の場合には {\tt NULL} を与えてください。
+
+\vspace*{15mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+参考 : 同一のアプリケーションプログラムを、ソースコードを変更すること無く
+Remote CUDA と通常の CUDA の両方でコンパイルできるようにするためには、
+以下に示すように C プリプロセッサディレクティブを用いて
+{\tt rcudaSetErrorHandler()} の呼び出しを保護してください。
+
+\begin{verbatim}
+#ifdef __RCUDA__
+    rcudaSetErrorHandler(errhandler, (void *)&data);
+#endif
+\end{verbatim}
+
+\noindent
+ここで {\tt \_\_RCUDA\_\_} は {\tt rcudacc} が自動的に定義する定数マクロです
+(第 \ref{sec:rcudacc} 章を参照)。
+
+\end{minipage}\\[3mm]
+
+\clearpage
+
+\Section{性能実測}\label{sec:perf}
+
+Remote CUDA ライブラリと、それを使用した Remote CUDA クライアントの実測
+性能を以下に示します。測定に使用したリモート GPU は GeForce GTX280 です。
+\vspace*{-5mm}
+
+\Subsection{Remote CUDA ライブラリの通信性能}
+
+\begin{tabular}{rrrrr}
+\hline
+データ長 (byte)   & \multicolumn{2}{l}{ローカル $\Rightarrow$ リモート} & \multicolumn{2}{l}{ローカル $\Leftarrow$ リモート} \\
+                  & InfiniBand & 100Base                        & InfiniBand & 100Base \\
+                  &            &                                &            & (MB/s) \\
+\hline
+\hline
+    128 &   1.8 &  0.3 &   1.8 &   0.5 \\
+    281 &   3.9 &  0.7 &   3.9 &   0.7 \\
+    619 &   8.4 &  1.4 &   8.4 &   2.0 \\
+   1362 &  17.9 &  2.7 &  17.7 &   2.7 \\
+   2998 &  36.4 &  3.7 &  35.1 &   3.7 \\
+   6596 &  71.5 &  6.2 &  67.6 &   6.2 \\
+  14512 & 123.2 &  8.0 & 113.1 &   8.0 \\
+  31927 & 185.1 &  9.6 & 164.7 &   9.6 \\
+  70241 & 247.0 & 10.1 & 197.3 &  10.6 \\
+ 154530 & 386.1 & 11.2 & 305.9 &  11.2 \\
+ 339967 & 509.3 & 11.5 & 396.4 &  11.5 \\
+ 747927 & 590.1 & 11.5 & 466.7 &  11.5 \\
+1645440 & 639.9 & 11.0 & 493.0 &  10.9 \\
+3619968 & 667.1 & 10.8 & 453.8 &  10.8 \\
+7963931 & 678.4 &  9.8 & 452.7 &   9.8 \\
+\hline
+\end{tabular}
+
+\Subsection{アプリケーションプログラム {\tt claret} の実効性能}
+
+\begin{tabular}{rrrrrrr}
+\hline
+          & \multicolumn{3}{l}{改良版}                & \multicolumn{3}{l}{オリジナル} \\
+粒子数    & ローカル & \multicolumn{2}{l}{リモート}   & ローカル & \multicolumn{2}{l}{リモート} \\
+          &          & InfiniBand  & 100Base          &          & InfiniBand  & 100Base \\
+          &          &             &                  &          &             & (Gflops) \\
+\hline
+\hline
+     8    &        0 &          0  &                0 &        0 &           0 &                0 \\
+    64    &        1 &          0  &                0 &        1 &           0 &                0 \\
+   216    &        6 &          3  &                1 &        6 &           2 &                0 \\
+   512    &       16 &         10  &                3 &       13 &           6 &                1 \\
+  1000    &       33 &         24  &                8 &       29 &          17 &                4 \\
+  1728    &       57 &         46  &               18 &       52 &          35 &               11 \\
+  2744    &       89 &         75  &               33 &       84 &          63 &               22 \\
+  4096    &      130 &        110  &               52 &      125 &          99 &               39 \\
+  5832    &      174 &        150  &               77 &      170 &         136 &               60 \\
+\hline
+\end{tabular}
+
+\noindent
+注意 : オリジナル版の claret は、タイムステップ毎にデバイスメモリの確保
+{\tt cudaMalloc()} と解放 {\tt cudaFree()} を行っていますが、これらは粒子
+数が変わらない限りは不要です。改良版はメモリの確保と解放を必要最小限に抑え
+たものです。
+
+\clearpage
+
+\Section{Remote CUDA 実装の詳細}\label{sec:rcudainside}
+
+\Subsection{Remote CUDA ライブラリのサポート範囲}
+
+Remote CUDA ライブラリは CUDA ランタイムライブラリのすべての API
+をリモート化するわけではありません。
+以下の条件に該当する API は、現在のところリモート化されていません。
+
+\begin{itemize}
+\item グラフィクス制御を伴う API (例 : {\tt cudaGraphicsGLRegisterBuffer()})
+\item カーネル実行に関する API (例 : {\tt cudaLaunch()})
+\end{itemize}
+%
+
+\Subsection{Remote CUDA コンパイラのサポート範囲}
+
+Remote CUDA コンパイラは CUDA C コンパイラでコンパイル可能なすべての
+ソースコードをコンパイルできるわけではありません。
+現在のところ、アプリケーションプログラムのソースコードが
+以下の条件に該当する記述を含む場合には、そのソースコードは
+コンパイルできません。
+
+\begin{itemize}
+
+\item CUDA カーネルを関数ポインタ経由で呼び出す記法。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+  例)
+    void (*kernel)(...);
+
+    __global__ void myKernel(...)
+    {
+      ....
+    }
+
+    ...
+
+    void main(void)
+    {
+      kernel = &myKernel;
+      ...
+      kernel<<<grid, threads>>>(...);
+    }
+\end{verbatim}
+\end{minipage}
+
+\end{itemize}
+%
+
+
+\Subsection{RPC インタフェース}
+
+Remote CUDA の RPC インタフェースは XDR 言語を用いて{\tt
+  \$rcudapkg/src/rcudarpc.x} 内に記述されています。この記述を {\tt
+  rpcgen} によってコンパイルすると、クライアントスタブ {\tt
+  \$rcudapkg/src/rcudarpc\_clnt.c}、サーバスタブ {\tt
+  \$rcudapkg/src/rcudarpc\_svc.c} などが生成されます。XDR や {\tt
+  rpcgen} の詳細については別途資料をあたって下さい。
+
+\Subsection{リモートホストへの CUDA カーネルの転送}
+
+{\tt .cu} ファイル内で定義された CUDA カーネル関数は、{\tt rcudacc} に
+よって抽出され、{\tt rcudacc} はこれを オプションスイッチ {\tt --ptx }
+とともに {\tt nvcc} へ渡し、{\tt .ptx} 形式 (高レベルアセンブリ記述) へ
+と変換します。
+
+Remote CUDA クライアント実行時に、クライアントは上記の {\tt .ptx} ファ
+イルをカーネルイメージとしてリモートホスト上のサーバ {\tt rcudasvr} へ転
+送します。サーバは CUDA ドライバ API のひとつ、{\tt
+  cuModuleLoadData()} を使用してこのイメージをロードし、{\tt
+  cuModuleGetFunction()} を使用してカーネル関数を取り出します。
+
+カーネル関数への引数は別途クライアントから転送されます。サーバは {\tt
+  cuParamSetv(), cuParamSeti(), cuParamSetf(), cuParamSetSize()} を使用
+してこれらの引数をカーネル関数のコンテクストにセットします。その後、ブ
+ロックの情報を {\tt cuFuncSetBlockShape()} によって設定し、{\tt
+  cuLaunchGrid()} によってカーネル関数を起動します。
+
+以上の動作は {\tt \$rcudapkg/src/rcudasvt.cu} 内の {\tt
+  rcudalaunchkernel\_1\_svc()} に記述されています。
+
+\Section{Remote CUDA ソフトウェアパッケージ更新履歴}\label{sec:history}
+\vspace*{5mm}
+
+\begin{tabular}{llll}
+\hline
+version & date & description & author(s)\\
+\hline
+2.0.0   & 26-Feb-2011 & CUDA3.2 の API に対応      & AK\\
+        &             & (グラフィクス関連 API ほか一部を除く)。& \\
+        &             & 冗長化機能を実装。         & \\
+        &             & C++ テンプレートに対応。   & \\[3mm]
+1.0.1   & 26-Oct-2009 & {\tt rcudatest} に機能3,4を追加。 & AK\\[3mm]
+1.0.0   & 22-Oct-2009 & 初版作成。                 & A. Kawai\\[3mm]
+\hline
+\end{tabular}\\[5mm]
+
+\noindent
+お問い合わせ:\\
+株式会社 K\&F Computing Research ({\tt support@kfcr.jp})
+
+\end{document}

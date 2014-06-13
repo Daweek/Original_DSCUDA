@@ -1,0 +1,8 @@
+export CUDAPATH=/usr/local/cuda
+export CUDASDKPATH=/usr/local/cuda/NVIDIA_GPU_Computing_SDK
+export DSCUDA_PATH=/usr/local/DSCUDA/dscudapkg1.6.1
+export DSCUDA_WARNLEVEL=2
+export LD_LIBRARY_PATH=$CUDAPATH/lib64:$LD_LIBRARY_PATH
+export PATH=$DSCUDA_PATH/src:$CUDAPATH/bin:$PATH
+export DSCUDA_REMOTECALL="tcp"
+export OMP_NUM_THREADS=16

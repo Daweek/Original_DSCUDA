@@ -1,0 +1,19 @@
+/home/knoppix/bandwidthTest Starting...
+
+Running on...
+
+ Device 0: GeForce GTX 580
+ Quick Mode
+
+ Host to Device Bandwidth, 1 Device(s), Paged memory
+   Transfer Size (Bytes)	Bandwidth(MB/s)
+   33554432			765.3
+
+ Device to Host Bandwidth, 1 Device(s), Paged memory
+   Transfer Size (Bytes)	Bandwidth(MB/s)
+   33554432			542.9
+
+ Device to Device Bandwidth, 1 Device(s)
+   Transfer Size (Bytes)	Bandwidth(MB/s)
+   33554432			160000.0
+

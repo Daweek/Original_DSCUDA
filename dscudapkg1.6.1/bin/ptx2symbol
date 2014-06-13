@@ -1,0 +1,223 @@
+#!/usr/bin/ruby -w
+
+$LOAD_PATH.unshift("#{File.dirname($0)}/../lib/")
+
+require 'English'
+
+# DS-CUDA modules
+require 'utility'
+include Utility
+
+@verbose = (ENV['DSCUDA_WARNLEVEL'] ? ENV['DSCUDA_WARNLEVEL'] : 2).to_i
+
+def pretty_function_to_mangled_name(pfstr, is_static = false)
+  symstr = is_static ? '_ZL' : '_Z'
+  pfstr =~ /\A ( [^\(]* ) \s* \( (.*) \z/xms
+  fname = get_last_word($1)
+  pfstr = $2
+
+  # length of the original function name is shorter than fname.size by 'dscuda'.size.
+  symstr += (fname.size - 'dscuda'.size).to_s + fname.gsub(/\Adscuda/, '')
+  unless pfstr =~ /\A (.*) \) \s* (?: \[ \s* with \s* (.*) \])* \s* \z/xms
+    vwarn "invalid format."
+    exit 1
+  end
+  args = $1
+  templates = $2
+  if templates and templates.size > 0
+    str, ts = expand_templates(templates)
+    symstr += str
+  end
+
+  # argument mangling logic is under development.
+=begin
+  p "templates encoding:"
+  p ts
+  symstr += expand_args(args, ts)
+=end
+  symstr
+end
+
+def get_last_word(srcstr)
+  srcstr = srcstr.split(/\b/).map{ |word|
+    word = word.strip
+    word.size == 0 ? nil : word
+  }.compact
+  return srcstr[-1]
+end
+
+def expand_templates(srcstr)
+  dststr = 'I'
+  assigns = []
+  templates = []
+  srcstr.split(/,/).each { |eqstr|
+    eqstr =~ /\A (.*) = (.*) \z/xms
+    eq = {:param => $1.strip, :arg => $2.strip}
+    assigns.push eq
+  }
+  assigns.each { |eq|
+    params = eq[:param].split(/\s+/s)
+    if params.size == 1 # param is a typename. eg) T, CLASS, REAL
+      dststr += encoded_typename(eq[:arg])
+      templates.push params[0]
+    else # param is a variable. eg) int N, char CCODE
+      typename = params[0..-2].inject('') { |sum, p| sum += "#{p} "} 
+      c = encoded_typename(typename)
+      case c
+      when /b/
+        bool01 = eq[:arg] =~ /true/ ? '1' : '0'
+        dststr += 'L' + c + bool01 + 'E'
+      when /[ijlmstxy]/
+        litnum = eq[:arg].gsub(/[^\d]+/, '') # eg) 123ULL => 123
+        dststr += 'L' + c + litnum + 'E'
+      when /[c]/
+        ccode = eq[:arg].gsub(/\A'(.*)'\z/) { $1 }[-1]
+        dststr += 'L' + c + ccode.to_s + 'E'
+      else
+      end
+    end
+  }
+  dststr += 'Ev' # sometimes Lv. don't know what it means.
+  ts = []
+  templates.each_with_index { |tplt, i|
+    code = 'T' + (i > 0 ? (i - 1).to_s : '')
+    element = { :code => code, :name => tplt }
+    ts.push element
+  }
+  return dststr, ts
+end
+
+def expand_args(srcstr, templates)
+  dststr = ''
+  args = srcstr.split(/,/).each { |arg|
+    arg.strip
+  }
+  args = args[4..-1] # remove the first 4 args, i.e., grid, block, shmemsize, streamid.
+  puts args
+
+  dststr
+end
+
+def encoded_typename(typename, templates = [])
+  case typename.strip
+  when /\A bool \z/xms
+    'b'
+  when /\A char \z/xms
+    'c'
+  when /\A double \z/xms
+    'd'
+  when /\A long \s+ double \z/xms
+    'e'
+  when /\A float \z/xms
+    'f'
+  when /\A unsigned \s+ char \z/xms
+    'h'
+  when /\A int \z/xms
+    'i'
+  when /\A unsigned \s+ int \z/xms
+    'j'
+  when /\A long \s+ int \z/xms
+    'l'
+  when /\A (?: unsigned \s+ |long \s+){2} int \z/xms
+    'm'
+  when /\A short \s+ int \z/xms
+    's'
+  when /\A (?: unsigned \s+ |short \s+){2} int \z/xms
+    't'
+  when /\A void \z/xms
+    'v'
+  when /\A long \s+ long \s+ int \z/xms
+    'x'
+  when /\A (?: unsigned \s+ |long \s+ long \s+){2} int \z/xms
+    'y'
+  else # struct, enum or union.
+    "#{typename.size}#{typename}"
+  end
+end
+
+def lookInsidePtx(key, list)
+  candidates = []
+  list.each {|entry|
+    candidates.push entry if entry =~ /\A #{key} /xms
+  }
+  if candidates.size > 1
+    vwarn "multiple entryies found."
+    vwarn "key is:"
+    vwarn key
+    vwarn
+    vwarn "candidates are:"
+    vwarn candidates.collect {|e| e + "\n"}
+    exit 1
+  end
+
+  if candidates.size == 0
+    vwarn
+    vwarn "no matching entry found."
+    vwarn "key is:"
+    vwarn key
+    vwarn
+    vwarn "entries are:"
+    vwarn list.collect {|e| e + "\n"}
+    vwarn
+
+    exit 1
+  end
+
+  return candidates[0]
+end
+
+#
+# test inputs
+#
+str1 = %Q<void myfunc1(const int*, const int (*)[3][4], unsigned char, double)>
+str2 = %Q<void myfunc2(GOGO, AUAU (*)[5][4], GAGA (**)[XXX]) [with AUAU = double, GAGA = float, GOGO = abc, int XXX = 3, char YYY = 'N']>
+str3 = %Q<const double myfunc(a, b, c)>
+
+str4 = [
+        %Q<void dscudatestKernel(dim3, dim3, size_t, CUstream_st*, REAL*, REAL2*) [with REAL = int, REAL2 = float]>,
+        %Q<_Z10testKernelIifEvPT_PT0_>
+       ]
+
+str5 = [
+        %Q<void dscudatestKernel(dim3, dim3, size_t, CUstream_st*, REAL*, REAL*) [with REAL = float]>,
+        %Q<_Z10testKernelIfEvPT_S1_>
+       ]
+
+str = str5
+
+if $ARGV.empty?
+  puts <<-"END_OF_TXT"
+Convert g++ __PRETTY_FUNCTION__ format input into a mangled function name.
+The input is taken from stdin. Conversion logic does not work stand alone.
+It requires a .ptx file for reference.
+
+usage: #{$0} <.ptx file>
+
+END_OF_TXT
+  exit 1
+end
+
+ptxfile = $ARGV.shift
+ptxentry = []
+open(ptxfile, 'r').each_line { |line|
+  if line =~ /\A \s* .entry \s* ([^\s]*) .* \z/xms
+    ptxentry.push $1
+  end
+}
+
+if STDIN.tty? # for debugging
+  symstr = pretty_function_to_mangled_name(str[0])
+  puts "base   : " + symstr
+  symstr = lookInsidePtx(symstr, ptxentry)
+  puts "output : " + symstr
+  puts "gold   : " + str[1]
+  puts symstr == str[1] ? 'OK' : 'NG'
+else
+  symstr = $stdin.read
+  vputs(5, "input        : " + symstr)
+  symstr = pretty_function_to_mangled_name(symstr)
+  vputs(5, "base         : " + symstr)
+  symstr = lookInsidePtx(symstr, ptxentry)
+  vputs(5, "output       : " + symstr)
+  printf symstr
+end

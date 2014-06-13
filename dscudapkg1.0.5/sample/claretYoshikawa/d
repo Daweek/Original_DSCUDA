@@ -1,0 +1,9 @@
+
+< NVCC          ?= $(CUDAPATH)/bin/nvcc -use_fast_math -O 
+---
+> NVCC          ?= $(CUDAPATH)/bin/nvcc -use_fast_math -O -ccbin /usr/bin
+
+10,12c10,11
+< CFLAGS         = -DVTGRAPE -O -ffast-math -funroll-loops 
+< NVCCFLAGS      = -DVTGRAPE -O
+< 

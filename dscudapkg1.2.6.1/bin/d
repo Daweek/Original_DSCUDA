@@ -1,0 +1,293 @@
+23,25d22
+< Cxx           = ENV['CXX'] ? ENV['CXX'] : "g++"
+< 
+< CudaKernelRe = %r{  (?: (template \s* <[^>]*>) \s+)* \b ( \s* static \s+)* __global__ \s+ (?: \s* \w+ \b | \s* \* )* \s* (\w+) \s* }xm
+141d137
+<   cppdef += ' -D__CUDACC__ '
+144c140
+<   cmd = "#{Nvcc} #{ptxarg} #{Dscudadef} -I#{Dscudaincdir} -I#{Cudasdkincdir} --ptx -o #{ptxfile} #{infile}"
+---
+>   cmd = "#{Nvcc} #{ptxarg} #{Dscudadef} -I#{Dscudaincdir} -I#{Cudasdkincdir} --ptx -o #{ptxfile} #{infile_rcu}"
+227c223
+< def run_through_cpp(srcstr, ipath, cppdef)
+---
+> def run_through_cpp(srcstr, ipath)
+229c225
+<   instream = "| cpp -x c++ #{ipath} #{cppdef} <<END_OF_SRC\n#{srcstr}\nEND_OF_SRC\n"
+---
+>   instream = "| cpp -x c++ #{ipath} <<END_OF_SRC\n#{srcstr}\nEND_OF_SRC\n"
+274a271
+>   until srcstr.empty?
+276,277c273,276
+<   begin
+<     nonlit, lit, left = srcstr.eat_a_c_literal()
+---
+>     if srcstr !~ /\b (\w+) \s* (?: < ( \s* [^<]*?) > )? \s* <<< \s* ( .*? ) >>> \s* \( /xms
+>       dststr += srcstr
+>       break # no more kernel call.
+>     end
+279,300c278,292
+<     # puts("nonlit: #{nonlit[-30..-1]}");
+<     # puts("lit: #{lit}");
+<     # puts("left: #{left[0..30]}");
+<     # puts("----")
+<     srcstr = left
+< 
+<     if nonlit =~ /\b (\w+) \s* (?: < ( \s* [^<]*?) > )? \s* <<< \s* ( .*? ) >>> \s* \( /xms
+< 
+<       strpre = $`
+<       strmatched = $&
+<       strpost = $'
+<       kname = $1
+<       kts = $2
+<       kps = $3
+< 
+<       # capture the argumens of the CUDA API into arg0.
+<       (matched, dummy, args0, postmatch) = ("(" + strpost).balanced_c_exp('(', ')', true)
+<       unless matched # malformed function call. don't touch.
+<         dststr += nonlit + lit
+<         next
+<       end
+<       args0 = args0.split_c_exp_list
+---
+>     strpre = $`
+>     strmatched = $&
+>     strpost = $'
+>     kname = $1
+>     kts = $2
+>     kps = $3
+> 
+>     # matched kernelcall might be a part of a literal string. skip it, if any.
+>     strskipped, strleft = strpre.eat_a_c_literal_string(strmatched + strpost)
+>     if strskipped.size > 0
+>       dststr += strskipped
+>       srcstr = strleft
+>       next
+>     end
+>     dststr += strpre
+302,319c294,299
+<       # generate a wrapper call.
+<       args0 = args0.join(', ')
+<       nkdir = kps.split_c_exp_list.size  # split kernel parameter list and count the number.
+<       if nkdir < 3
+<         kps += ', 0'  # append 3rd arg (shared mem size).
+<       end
+<       if nkdir < 4
+< #        kps += ', NULL'  # append 4th arg (stream id).
+<         kps += ', 0'  # append 4th arg (stream id).
+<       end
+<       kts = kts ? "<#{kts}>" : ''
+<       kps_args0 = kps + (args0.size > 0 ? ", #{args0}" : '')
+<       str = "dscuda#{kname}#{kts}(#{kps_args0})"
+<       vinfo("A kernel call found : #{strmatched.gsub(/\n/, ' ')[0..100]}...")
+<       vinfo("Substituted with    : #{str}");
+<       dststr += strpre + str + postmatch + lit
+<     else
+<       dststr += nonlit + lit
+---
+>     # capture the argumens of the CUDA API into arg0.
+>     (matched, dummy, args0, srcstr) = ("(" + strpost).balanced_c_exp('(', ')', true)
+>     unless matched # malformed function call. don't touch.
+>       dststr += strmatched
+>       srcstr = strpost
+>       next
+320a301
+>     args0 = args0.split_c_exp_list
+322c303,318
+<   end while left.size > 0
+---
+>     # generate a wrapper call.
+>     args0 = args0.join(', ')
+>     nkdir = kps.split_c_exp_list.size  # split kernel parameter list and count the number.
+>     if nkdir < 3
+>       kps += ', 0'  # append 3rd arg (shared mem size).
+>     end
+>     if nkdir < 4
+>       kps += ', NULL'  # append 4th arg (stream id).
+>     end
+>     kts = kts ? "<#{kts}>" : ''
+>     kps_args0 = kps + (args0.size > 0 ? ", #{args0}" : '')
+>     str = "false ? #{kname}#{kts}<<<#{kps}>>>(#{args0}) : dscuda#{kname}#{kts}(#{kps_args0})"
+>     vinfo("A kernel call found : #{strmatched.gsub(/\n/, ' ')[0..100]}...")
+>     vinfo("Substituted with    : #{str}");
+>     dststr += str
+>   end # until
+340a337
+>     until srcstr.empty?
+342,346c339
+<     begin
+<       nonlit, lit, left = srcstr.eat_a_c_literal()
+<       srcstr = left
+< 
+<       case nonlit
+---
+>       case srcstr
+351a345,359
+>         # matched apicall might be a part of a literal string. skip it, if any.
+>         strskipped, strleft = strpre.eat_a_c_literal_string(strmatched + strpost)
+>         if strskipped.size > 0
+>           dststr += strskipped
+>           srcstr = strleft
+>           next
+>         end
+>         dststr += strpre
+> =begin
+>       p '-------------'
+>       p strpre[-50..-1]
+>       p strmatched
+>       p strpost[0..100]
+>       p '-------------'
+> =end
+353,355c361,363
+<         (matched, dummy, args0, postmatch) = ("(" + strpost).balanced_c_exp('(', ')', true)
+<         unless matched # malformed function call. don't touch.
+<           dststr += nonlit + lit
+---
+>         (matched, dummy, args0, srcstr) = ("(" + strpost).balanced_c_exp('(', ')', true)
+>         unless matched # malformed function call.
+>           dststr += strmatched
+361c369
+<         dststr += strpre + send(substituter, args0, ptxfile) + postmatch + lit
+---
+>         dststr += send(substituter, args0, ptxfile)
+364c372,373
+<         dststr += nonlit + lit
+---
+>         dststr += srcstr
+>         srcstr = ''
+366,368c375
+< 
+<     end while left.size > 0
+< 
+---
+>     end # until
+370d376
+< 
+484c490
+<   rcufile = Dscudatmpdir + '/' + File.basename(cufile, '.cu') + '.rcu.ii'
+---
+>   rcufile = Dscudatmpdir + '/' + File.basename(cufile, '.cu') + '.rcu.cu'
+510a517,534
+> 
+>   # process #include directives by cpp.
+>   # !!! this causes error when the result passed to nvcc.
+>   # dststr = run_through_cpp(dststr, incpath)
+> 
+>   dststr = expand_inclusion(dststr, ipath, cufile, [], 0)
+>   dststr = dststr.omit_c_comments
+> 
+>   dststr = run_through_cpp_specified_regions(dststr, incpath, cppdef)
+> 
+>   # generate DSCUDA-kernel stubs.
+>   kernels = parse_kernel_def(dststr)
+>   dststr = append_kernel_stub(dststr, ptxfile, kernels)
+>   # !!!  dststr = insert_kernel_prototype(dststr, kernels)
+> 
+>   # substitute CUDA-kernel calls with DSCUDA-kernel stub calls.
+>   dststr = wrap_kernelcalls(dststr)
+> 
+521d544
+<   puts('wraping CUDA API calls...')
+523,537c546
+< 
+<   # process #include directives by cpp.
+< #  cppdef += ' -D__CUDACC__ '
+<   dststr = run_through_cpp(dststr, incpath, cppdef)
+< 
+<   # generate DSCUDA-kernel stubs.
+<   puts('parsing kernel defs...')
+<   kernels, dststr = parse_kernel_def(dststr)
+<   puts('appending kernel stubs...')
+<   dststr = append_kernel_stub(dststr, ptxfile, kernels)
+< 
+<   # substitute CUDA-kernel calls with DSCUDA-kernel stub calls.
+<   puts('wraping kernel calls...')
+<   dststr = wrap_kernelcalls(dststr)
+< 
+---
+>                                             
+541,542d549
+<   puts("wrote '#{rcufile}'.")
+< 
+546,560c553
+< 
+< # kernel definitions in srcstr are parsed.
+< # info for each kernel are returned as kdef.
+< # original defs in srcstr are replaced with dummy ones and returned as dststr.
+< #
+< # eg) __global__ void myKernel(float *a, float *b) {
+< #         int i = threadIdx.x;
+< #         b[i] = a[i] * 2;
+< #     }
+< #
+< #     => kdefs, dststr
+< #        where kdefs = [ [:name=myKernel, :arg=[a,b], ...], ]
+< #              dststr = "__global__ void myKernel(float *a, float *b) { /* nop */ }"
+< #
+< def parse_kernel_def(srcstr)
+---
+> def parse_kernel_def(str)
+562,563c555
+<   dststr = ''
+<   strleft = srcstr
+---
+>   strleft = str
+565,571c557,558
+<   until srcstr.empty?
+<     if srcstr !~ CudaKernelRe
+<       dststr += srcstr
+<       break
+<     end
+<     strpre  = $`
+<     strbody = $&
+---
+>   until str.empty?
+>     break unless str =~ / (?: (template \s* <[^>]*>) \s+)* \b ( \s* static \s+)* __global__ \s+ (?: \s* \w+ \b | \s* \* )* \s* (\w+) \s*  /xms
+584,585c571
+<       srcstr = strleft
+<       dststr += strpre + strbody
+---
+>       str = $'
+645,646c631
+<     srcstr = strleft
+<     dststr += strpre + strbody + "{\n    /* nop */\n}\n\n"
+---
+>     str = strleft
+648,649c633
+< 
+<   return kdefs, dststr
+---
+>   return kdefs
+910a895,926
+> =begin
+> # insert DSCUDA-kernel prototype defs just before original prototypes or defs,
+> # so that all necessary typedef, templates, #define-s are ready at that point.
+> #
+> def insert_kernel_prototype(srcstr, kdefs)
+>   prototmp = <<-"END_OF_PROTOTMP"
+> \nvoid dscuda%kname%(dim3 _gdim, dim3 _bdim, size_t _smemsize, cudaStream_t _stream %kargs%);
+> END_OF_PROTOTMP
+> 
+>   kdefs.each { |kdef|
+>     # generate a prototype def.
+>     kprotostr = ''
+>     str = kdef[:template] ? kdef[:template] + "\n" : ''
+>     str += prototmp
+>     str = str.gsub(/%kname%/, "#{kdef[:name]}")
+>     if kdef[:arg] =~ / \A \s* \z /xms
+>       str = str.gsub(/%kargs%/, '') # kernel has not arg.
+>     else
+>       str = str.gsub(/%kargs%/, ", #{kdef[:arg]}")
+>     end
+>     kprotostr << str
+> 
+>     # insert it just before the original prototype or the original definition.
+>     re = %r/( (?: template \s* <[^>]*> \s+ )* \b (?: \s* static \s+)* __global__ \s+ (?: \s* \w+ \b | \s* \* )* \s* #{kdef[:name]} \s* )/xms
+>     # note that it should be inserted only once, and thus do nont use #gsub method but #sub.
+>     srcstr = srcstr.sub(re) { "#{kprotostr}\n#{$1}"}
+>   }
+> 
+>   return srcstr
+> end
+> =end
+> 

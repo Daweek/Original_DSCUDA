@@ -1,0 +1,172 @@
+DS-CUDA Quickstart guide
+
+  This is a minimum description for DS-CUDA installation and usage.
+  More detailed documentation exist only in Japanese
+  ($dscudapath/doc/userguide-j.pdf) for now. English version will be
+  ready soon (I hope).
+
+  Dec 18, 2012,
+  Atsushi Kawai (kawai@kfcr.jp)
+
+
+1. Installaton
+================
+
+(1.1) Untar the package dscudapkgA.B.C.tar.gz.  Hereafter, '$dscudapath'
+      denotes the directory where the package is untared.
+
+(1.2) Change directory to $dscudapath/src.
+
+(1.3) Set the following environment variables.
+
+      CUDAPATH    : the path to the CUDA Toolkit. [/usr/local/cuda]
+      CUDASDKPATH : the path to the CUDA SDK. [/usr/local/cuda/NVIDIA_GPU_Computing_SDK]
+      DSCUDA_PATH : the path to this DS-CUDA package.
+
+(1.4) Make sure the following tools are properly installed in your environment.
+
+      . CUDA Toolkit & SDK (tested with version 4.1)
+      . GNU C++ compiler (tested with version 4.5.1)
+      . Ruby (tested with version 1.8.7)
+      . OFED (tested with version 1.5.4)
+
+     Note : ruby must be installed into /usr/bin. Otherwise you need
+            to make a symbolic link to /usr/bin/ruby.
+
+(1.5) Type 'make' to generate the followings.
+
+      $dscudapath/bin/dscudasvr       : DS-CUDA server executable.
+      $dscudapath/lib/libdscuda_rpc.a : DS-CUDA client library (data transfer with RPC).
+      $dscudapath/lib/libdscuda_ibv.a : DS-CUDA client library (data transfer with IB Verb).
+      $dscudapath/lib/libcudart.so    : Dummy CUDA runtime library.
+
+
+2.Test Run
+==========
+
+2s. Server side
+----------------
+
+Here we describe how to launch the DS-CUDA server program.
+
+(2s.1) Set the environment variables as described in (1.3).
+       Also set the following variables.
+
+       DSCUDA_REMOTECALL : 'rpc' or 'ibv' to select the data transfer protocol.
+                           Set to 'rpc' if you don't understand what it means.
+       LD_LIBRARY_PATH : Add $CUDAPATH/lib64 to this variable.
+
+(2s.2) Change directory to $dscudapath/src.
+
+(2s.3) Type './dscudasvr' to launch the server program. You will see
+       the following outputs.
+
+>./dscudasvr                 
+dscudasvr[0] : WarnLevel: 2
+dscudasvr[0] : method of remote procedure call: RPC
+server id : 0
+ndevice : 1
+real device       : 0
+virtual device    : 0
+
+
+2c. Client side
+----------------
+
+Here we describe a procedure to build & run a client application.  As
+an example, we use a simple application that performs additions of two
+randomly generated numbers.
+
+(2c.1) Set the environment variables as described in (1.3).
+       Set also the following variables.
+
+       LD_LIBRARY_PATH : Add $DSCUDA_PATH/lib to this variable.
+       DSCUDA_SERVER   : Name or IP address of the node on which DS-CUDA
+                         server is launched at step (2s.3).
+
+(2c.2) Change directory to $dscudapath/sample/vecadd.
+
+(2c.3) If you set DECUDA_REMOTECALL to 'rpc' at step (2s.1) , type
+       'make userapp_rpc' to generate 'userapp_rpc', an executable of
+       a client application.
+
+       If you set DECUDA_REMOTECALL to 'ibv', type 'make' to generate 'userapp'.
+
+(2c.4) Run userapp_rpc (or userapp), and then you will see the
+       following outputs. The IP address and random numbers may differ
+       on your environment.
+
+>./userapp_rpc 
+WarnLevel: 2
+method of remote procedure call: RPC
+automatic data recovery: off
+Established a socket connection to ds08ib:0 (port 65432) ...
+Client IP address : 192.168.0.107
+try 0
+ 39.00 +   6.00 =   45.00
+ 41.00 +  51.00 =   92.00
+ 17.00 +  63.00 =   80.00
+ 10.00 +  44.00 =   54.00
+ 41.00 +  13.00 =   54.00
+ 58.00 +  43.00 =  101.00
+ 50.00 +  59.00 =  109.00
+ 35.00 +   6.00 =   41.00
+
+try 1
+ 60.00 +   2.00 =   62.00
+ 20.00 +  56.00 =   76.00
+ 27.00 +  40.00 =   67.00
+ 39.00 +  13.00 =   52.00
+ 54.00 +  26.00 =   80.00
+ 46.00 +  35.00 =   81.00
+ 51.00 +  31.00 =   82.00
+  9.00 +  26.00 =   35.00
+
+try 2
+ 38.00 +  50.00 =   88.00
+ 13.00 +  55.00 =   68.00
+ 49.00 +  24.00 =   73.00
+ 35.00 +  26.00 =   61.00
+ 37.00 +  29.00 =   66.00
+  5.00 +  23.00 =   28.00
+ 24.00 +  41.00 =   65.00
+ 30.00 +  20.00 =   50.00
+
+3. Some more detail
+====================
+
+. In order to use multiple GPUs, run multiple server programs and
+  specify them by the environment variable DSCUDA_SERVER.
+
+  For example, run 3 servers (2 on node0, 1 on node1) as follows.
+
+    node0>./dscudasvr -s 0 -d 0
+    node0>./dscudasvr -s 1 -d 2
+    node1>./dscudasvr
+
+  The option -s gives ID for the server program, -d gives ID for the
+  GPU device that is handled by the server.
+
+  On the client, set DSCUDA_SERVER as follows:
+
+    client> export DSCUDA_SERVER="node0:0 node0:1 node1:0",
+
+  so that an application program see 3 (virtual) GPUs, whose device
+  IDs are 0, 1, and 2. The device with ID 0, identified by 'node0:0',
+  actually stands for the device handled by the server program running
+  on node0, and has server ID 0 (assigned by -s 0 option). Similarly,
+  the device with ID 1 (i.e., node0:1) stands for the device on node0
+  and has server ID 1, and so on.
+
+. If you concatinate two device names not by a white space, but by a
+  comma, these devices works as a single virtual device with redundancy.
+  For example, if you set DSCUDA_SERVER as follows:
+
+    client> export DSCUDA_SERVER="node0:0,node0:1 node1:0",
+
+  an application program see 2 GPUs, whose device IDs are 0 and 1.
+  The device with ID 0 actually consists of two GPUs (nodle0:0 and node0:1).
+  These two performs exactly the same calculation, and DS-CUDA client library
+  warns if their calculation results do not match.
+
+EOF

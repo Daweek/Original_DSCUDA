@@ -1,0 +1,7 @@
+patched:
+   6668 2012-07-07 00:47 dscuda.h
+   1812 2012-07-05 15:50 dscudaverb.h
+  11493 2012-07-07 01:20 dscudaverb.cu
+  53021 2012-07-03 15:50 libdscuda_rpc.cu
+  24789 2012-07-05 17:16 libdscuda_ibv.cu
+  30701 2012-07-07 01:28 libdscuda.cu

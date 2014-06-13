@@ -1,0 +1,467 @@
+%!PS-Adobe-3.0 EPSF-3.0
+%%BoundingBox: 36 588 478 768
+%%Title: rcudacc
+%%CreationDate: Tue Oct 20 18:22:37 2009
+%%Creator: Tgif-4.1.45-QPL written by William Chia-Wei Cheng (bill.cheng@acm.org)
+%%ProducedBy: (unknown)
+%%Pages: 1
+%%DocumentFonts: (atend)
+%%EndComments
+%%BeginProlog
+
+/tgifdict 53 dict def
+tgifdict begin
+
+/tgifarrowtipdict 8 dict def
+tgifarrowtipdict /mtrx matrix put
+
+/TGAT % tgifarrowtip
+ { tgifarrowtipdict begin
+      /dy exch def
+      /dx exch def
+      /h exch def
+      /w exch def
+      /y exch def
+      /x exch def
+      /savematrix mtrx currentmatrix def
+      x y translate
+      dy dx atan rotate
+      0 0 moveto
+      w neg h lineto
+      w neg h neg lineto
+      savematrix setmatrix
+   end
+ } def
+
+/TGMAX
+ { exch dup 3 1 roll exch dup 3 1 roll gt { pop } { exch pop } ifelse
+ } def
+/TGMIN
+ { exch dup 3 1 roll exch dup 3 1 roll lt { pop } { exch pop } ifelse
+ } def
+/TGSW { stringwidth pop } def
+
+/bd { bind def } bind def
+
+/GS { gsave } bd
+/GR { grestore } bd
+/NP { newpath } bd
+/CP { closepath } bd
+/CHP { charpath } bd
+/CT { curveto } bd
+/L { lineto } bd
+/RL { rlineto } bd
+/M { moveto } bd
+/RM { rmoveto } bd
+/S { stroke } bd
+/F { fill } bd
+/TR { translate } bd
+/RO { rotate } bd
+/SC { scale } bd
+/MU { mul } bd
+/DI { div } bd
+/DU { dup } bd
+/NE { neg } bd
+/AD { add } bd
+/SU { sub } bd
+/PO { pop } bd
+/EX { exch } bd
+/CO { concat } bd
+/CL { clip } bd
+/EC { eoclip } bd
+/EF { eofill } bd
+/IM { image } bd
+/IMM { imagemask } bd
+/ARY { array } bd
+/SG { setgray } bd
+/RG { setrgbcolor } bd
+/SD { setdash } bd
+/W { setlinewidth } bd
+/SM { setmiterlimit } bd
+/SLC { setlinecap } bd
+/SLJ { setlinejoin } bd
+/SH { show } bd
+/FF { findfont } bd
+/MS { makefont setfont } bd
+/AR { arcto 4 {pop} repeat } bd
+/CURP { currentpoint } bd
+/FLAT { flattenpath strokepath clip newpath } bd
+/TGSM { tgiforigctm setmatrix } def
+/TGRM { savematrix setmatrix } def
+
+end
+
+%%EndProlog
+%%Page: 1 1
+
+%%PageBoundingBox: 36 588 478 768
+tgifdict begin
+/tgifsavedpage save def
+
+1 SM
+1 W
+
+0 SG
+
+72 0 MU 72 11.695 MU TR
+72 128 DI 100.000 MU 100 DI DU NE SC
+
+GS
+
+/tgiforigctm matrix currentmatrix def
+
+% POLY/OPEN-SPLINE
+0 SG
+GS
+   361 192 TR
+   [0.000 -1.000 1.000 0.000 8 21] CO
+   361 NE 192 NE TR
+GS
+   NP
+      361 192 M
+      361 334 L
+   TGSM
+   7 W
+   S
+   1 W
+GR
+GS
+   TGSM
+   NP
+      529 213 22.000 9.000 160 0 TGAT
+   1 SG CP F
+   0 SG
+   NP
+      529 213 22.000 9.000 160 0 TGAT
+   CP F
+GR
+GR
+
+% BOX
+0 SG
+GS
+   10 SM
+   GS
+      NP 532 176 M 848 176 L 848 252 L 532 252 L CP
+      2 W
+      S
+   GR
+GR
+
+% TEXT
+NP
+0 SG
+GS
+   736 182 TR
+   [2.082 0.000 0.000 2.082 -47 0] CO
+   736 NE 182 NE TR
+GR
+   GS
+      1 W
+      736 182 TR
+      [2.082 0.000 0.000 2.082 -47 0] CO
+      0 12 M
+      GS
+        GS
+        0
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (A Remote CUDA client) TGSW 
+        AD
+        GR
+      2 DI NE 0 RM
+            0 SG
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (A Remote CUDA client) SH
+      GR
+      0 15 RM
+      GS
+        GS
+        0
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (for remote GPU) TGSW 
+        AD
+        GR
+      2 DI NE 0 RM
+            0 SG
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (for remote GPU) SH
+      GR
+   GR
+
+% BOX
+0 SG
+GS
+   10 SM
+   GS
+      NP 68 176 M 368 176 L 368 448 L 68 448 L CP
+      2 W
+      S
+   GR
+GR
+
+% TEXT
+NP
+0 SG
+GS
+   260 134 TR
+   [2.082 0.000 0.000 2.082 -47 0] CO
+   260 NE 134 NE TR
+GR
+   GS
+      1 W
+      260 134 TR
+      [2.082 0.000 0.000 2.082 -47 0] CO
+      0 12 M
+      GS
+        GS
+        0
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (user_app.cu) TGSW 
+        AD
+        GR
+      2 DI NE 0 RM
+            0 SG
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (user_app.cu) SH
+      GR
+   GR
+
+% TEXT
+NP
+0 SG
+   GS
+      1 W
+      92 204 M
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            (__global__ void) SH
+      GR
+      0 17 RM
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            (userapp_kernel\(float *xi, ...\)) SH
+      GR
+      0 17 RM
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            ({) SH
+      GR
+      0 17 RM
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            (    ....) SH
+      GR
+      0 17 RM
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            (    for \(\) {) SH
+      GR
+      0 17 RM
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            (    ....) SH
+      GR
+      0 17 RM
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            (}) SH
+      GR
+   GR
+
+% TEXT
+NP
+0 SG
+   GS
+      1 W
+      88 328 M
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            (int) SH
+      GR
+      0 17 RM
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            (main\(\)) SH
+      GR
+      0 17 RM
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            ({) SH
+      GR
+      0 17 RM
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            (    ....) SH
+      GR
+      0 17 RM
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            (    userapp_kernel<<<grid, block>>>\(xi, ...\);) SH
+      GR
+      0 17 RM
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            (    ....) SH
+      GR
+      0 17 RM
+      GS
+            0 SG
+            /Helvetica FF [14 0 0 -14 0 0] MS
+            (}) SH
+      GR
+   GR
+
+% TEXT
+NP
+0 SG
+GS
+   488 170 TR
+   [2.082 0.000 0.000 2.082 -47 0] CO
+   488 NE 170 NE TR
+GR
+   GS
+      1 W
+      488 170 TR
+      [2.082 0.000 0.000 2.082 -47 0] CO
+      0 12 M
+      GS
+        GS
+        0
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (rcudacc) TGSW 
+        AD
+        GR
+      2 DI NE 0 RM
+            0 SG
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (rcudacc) SH
+      GR
+   GR
+
+% POLY/OPEN-SPLINE
+0 SG
+GS
+   361 384 TR
+   [0.000 -1.000 1.000 0.000 8 21] CO
+   361 NE 384 NE TR
+GS
+   NP
+      361 384 M
+      361 534 L
+   TGSM
+   3 W
+   S
+   1 W
+GR
+GS
+   TGSM
+   NP
+      529 405 12.000 5.000 160 0 TGAT
+   1 SG CP F
+   0 SG
+   NP
+      529 405 12.000 5.000 160 0 TGAT
+   CP F
+GR
+GR
+
+% TEXT
+NP
+0 SG
+GS
+   488 362 TR
+   [2.082 0.000 0.000 2.082 -47 0] CO
+   488 NE 362 NE TR
+GR
+   GS
+      1 W
+      488 362 TR
+      [2.082 0.000 0.000 2.082 -47 0] CO
+      0 12 M
+      GS
+        GS
+        0
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (nvcc) TGSW 
+        AD
+        GR
+      2 DI NE 0 RM
+            0 SG
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (nvcc) SH
+      GR
+   GR
+
+% BOX
+0 SG
+GS
+   10 SM
+   GS
+      NP 532 364 M 848 364 L 848 444 L 532 444 L CP
+      2 W
+      S
+   GR
+GR
+
+% TEXT
+NP
+0 SG
+GS
+   736 374 TR
+   [2.082 0.000 0.000 2.082 -47 0] CO
+   736 NE 374 NE TR
+GR
+   GS
+      1 W
+      736 374 TR
+      [2.082 0.000 0.000 2.082 -47 0] CO
+      0 12 M
+      GS
+        GS
+        0
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (A standalone executable) TGSW 
+        AD
+        GR
+      2 DI NE 0 RM
+            0 SG
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (A standalone executable) SH
+      GR
+      0 15 RM
+      GS
+        GS
+        0
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (for local GPU) TGSW 
+        AD
+        GR
+      2 DI NE 0 RM
+            0 SG
+            /Helvetica FF [12 0 0 -12 0 0] MS
+            (for local GPU) SH
+      GR
+   GR
+
+GR
+tgifsavedpage restore
+end
+showpage
+
+%%Trailer
+%MatchingCreationDate: Tue Oct 20 18:22:37 2009
+%%DocumentFonts: Helvetica
+%%EOF

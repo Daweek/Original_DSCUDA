@@ -1,0 +1,63 @@
+#!/bin/csh -f
+
+set version = 1.2.7
+
+set rootdir = `pwd`
+
+cat << DESC_END
+-----------------------------------------------
+ DS-CUDA software package back up program
+-----------------------------------------------
+DESC_END
+
+foreach f (./sample/* ./src ./doc)
+  if (-d $f) then
+    echo cleaning up $f ...
+    cd $f
+    make clean
+    cd ${rootdir}
+    echo done.
+    echo ''
+  endif
+end
+
+set rootnamedefault = dscudapkg${version}
+
+# update version number defined in lib/utility.rb.
+cd lib
+set vtmp = `echo $version | sed 's/\./ /g'`
+sed 's/Version  = .*$/Version  = %w['"$vtmp"']/' utility.rb > tmp.rb && mv tmp.rb utility.rb
+cd ${rootdir}
+
+LABEL_ROOTNAME:
+set rootname = ${rootnamedefault}
+echo ""
+echo -n "Specify the root name for the package (default ${rootname}): "
+set answer = $<
+if (${answer} != '') then
+  set rootname = ${answer}
+endif
+if (-f ${rootname}.tar.gz) then
+  echo -n "${rootname}.tar.gz exists. Overwrite? (y/n): "
+  set answer = $<
+  if (${answer} != 'y') then
+    goto LABEL_ROOTNAME
+  endif
+endif
+rm -rf ${rootname}.tar.gz
+
+mkdir tmp$$
+mkdir tmp$$/${rootname}
+
+tar cvfz tmp$$.tar.gz \
+    ./00* ./bin ./include ./lib ./sample ./script/ ./src ./doc ./misc
+
+cd tmp$$/${rootname}
+tar xvfz ../../tmp$$.tar.gz
+cd ..
+tar cvfz ./${rootname}.tar.gz ./${rootname}
+mv ./${rootname}.tar.gz ..
+cd ..
+/bin/rm -rf tmp$$ tmp$$.tar.gz
+echo "Created ./${rootname}.tar.gz"
+echo ""

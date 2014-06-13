@@ -1,0 +1,165 @@
+#!/usr/bin/ruby -w
+
+require 'English'
+
+unless $ARGV.size > 0
+  $stderr.puts <<-"USAGE_END"
+Usage : #{$0} <src-file>
+#{$0} converts <src-file> written in a simple markup language
+into a plain text. Markups currently supported are:
+  *                   section
+  **                  sub section
+  ***                 sub sub section
+  */                  section without section number.
+  **/                 sub section without sub section number.
+  ***/                sub sub section without sub sub section number.
+  \\label{label-name}  a label to current location.
+  \\ref{ref-name}      reference to a label.
+  \\toc                a table of contents.
+    USAGE_END
+  exit 1
+end
+
+srcfile = $ARGV[0]
+$stderr.puts "src-file : #{srcfile}"
+src = open(srcfile, "r").read
+
+#
+# look through label names & locations.
+#
+labels = []
+secno, subsecno, subsubsecno = 0, 0, 0
+labelloc = [0, 0, 0]
+dst = src.gsub(/  ^([*]+\/?) (.*?) (?= \\ | $) | \\label\{ ([^}]+) \} /xms) {
+  matched = $&
+  if labelname = $3 
+    labels.each { |label|
+      raise "label '#{labelname}' already in use." if label[:name] == labelname
+    }
+    item = {:name => labelname, :loc => labelloc}
+    labels.push item
+    next '' # remove \label.
+  end
+  level = ($1[-1] == '/'[0]) ? $1.size - 1 : $1.size
+  case level
+  when 1
+    secno += 1
+    subsecno = 0
+    subsubsecno = 0
+  when 2
+    subsecno += 1
+    subsubsecno = 0
+  when 3
+    subsubsecno += 1
+  end
+  labelloc = [secno, subsecno, subsubsecno]
+  matched # don't substitute section numbers yet.
+}
+
+#
+# substitute section numbers & references.
+#
+refs = []
+toc = []
+secno, subsecno, subsubsecno = 0, 0, 0
+dst = dst.gsub(/  ^([*]+\/?) (.*?) (?= \\ | $) | \\ref\{ ([^}]+) \} /xms) {
+
+  # substitute a reference.
+  #
+  if refname = $3 
+    lloc = nil
+    labels.each { |label|
+      if label[:name] == refname then
+        lloc = label[:loc]
+      end
+    }
+    raise "Label '#{refname}' not defined." unless lloc
+    no = nil
+    if lloc[0] == secno and lloc[1] == subsecno
+      no = "(#{lloc[2]})"
+    end
+    no || no = "#{lloc[0]}.#{lloc[1]}-(#{lloc[2]})"
+    item = {:name => refname, :no => no}
+    refs.push item
+    next no
+  end
+
+  # substitute a section number.
+  #
+  if $1[-1] == '/'[0]  # section without section number.
+    level = $1.size - 1
+    assignnum = false
+  else
+    level = $1.size
+    assignnum = true
+  end
+  name  = $2
+  case level
+  when 1
+    secno += 1
+    no = assignnum ? "#{secno}." : "  "
+    retval = no + name
+    subsecno = 0
+    subsubsecno = 0
+    item = {:no => no, :name => name, :child => []}
+    toc.push item
+  when 2
+    subsecno += 1
+    no = assignnum ? "#{secno}.#{subsecno}" : "   "
+    retval = no + name
+    subsubsecno = 0
+    item = {:no => no, :name => name, :child => []}
+    toc[-1][:child].push item
+  when 3
+    subsubsecno += 1
+    no = assignnum ? "(#{subsubsecno})" : "   "
+    retval = no + name
+    item = {:no => no, :name => name, :child => []}
+    toc[-1][:child][-1][:child].push item
+  end
+  retval
+}
+
+#
+# generate a table of contents.
+#
+tocbuf = ''
+Indent = 2
+toc.each { |sec|
+  tocbuf << ' '*Indent*0 << sec[:no] << sec[:name] << "\n"
+  sec[:child].each { |subsec|
+    tocbuf << ' '*Indent*1 << subsec[:no] << subsec[:name] << "\n"
+    subsec[:child].each { |subsubsec|
+      tocbuf << ' '*Indent*2 << subsubsec[:no] << subsubsec[:name] << "\n"
+    }
+  }
+}
+
+dst = dst.gsub(/\\toc \s*$/x, tocbuf)
+puts dst
+
+=begin
+labels.each { |label|
+  puts "#{label[:name]}  #{label[:loc].join('-')}"
+}
+
+refs.each { |ref|
+  puts "#{ref[:name]}  #{ref[:no]}"
+}
+=end
+
+#
+# toc structure:
+#
+# toc = [
+#         {:no => '1', :name => 'intro',   :child => []},
+#         {:no => '2', :name => 'main',    :child => []},
+#         {:no => '3', :name => 'summary', :child => []},
+#       ]
+#
+#  child = [
+#             {:no => '1.1', :name => 'something',    :child => []},
+#             {:no => '1.2', :name => 'anything',     :child => []},
+#             {:no => '1.3', :name => 'anotherthing', :child => []},
+#          ]
+#

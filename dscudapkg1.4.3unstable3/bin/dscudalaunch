@@ -1,0 +1,33 @@
+#!/usr/bin/ruby -w
+
+$LOAD_PATH.unshift("#{File.dirname($0)}/../lib/")
+
+require 'English'
+require 'optparse'
+
+# DS-CUDA modules
+require 'utility'
+
+include Utility
+
+Dscudabindir = "#{File.dirname($0)}"
+Conffile    = ENV['DSCUDA_SERVER_CONF'] ? ENV['DSCUDA_SERVER_CONF'] : "#{File.dirname($0)}/../misc/server.conf"
+
+server = []
+dststr = open(Conffile, 'r').read
+dststr = dststr.omit_c_comments
+dststr.each_line { |line|
+  next unless line =~ /^ \s* (\d+) \s* : \s* ((?: \d+ \s+)+) $/xs
+  s = {}
+  s[:svrid]  = $1
+  s[:devids] = $2.split(/\s+/s)
+  server.push s
+}
+print "DS-CUDA server configuration : "; p server
+
+cmd = ""
+server.each { |s|
+  cmd = %Q<#{Dscudabindir}/dscudasvr -c #{s[:svrid]} -d '#{s[:devids].join(' ')}' &>
+  puts cmd
+  system("bash -c \"#{cmd}\"")
+}

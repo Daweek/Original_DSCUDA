@@ -1,0 +1,917 @@
+\documentclass[12pt]{jarticle}
+
+\usepackage{graphicx}
+
+% \oddsidemargin -10mm
+% \evensidemargin -10mm
+% \textwidth 180mm
+
+\oddsidemargin 0mm
+\evensidemargin 0mm
+\topmargin -10mm
+\textwidth 160mm
+\textheight 230mm
+
+\newcommand{\Vec}[1]{\mbox{$\vec{#1}$}}
+
+\newcommand{\Section}[1]{\section{\textmd{\textgt{\textsf{#1}}}}}
+\newcommand{\Subsection}[1]{\subsection{\textmd{\textgt{\textsf{#1}}}}}
+\newcommand{\Subsubsection}[1]{\subsubsection{\textmd{\textgt{\textsf{#1}}}}}
+
+% #1:width(mm), #2:.eps, #3:caption
+
+\newcommand{\FigureL}[3]{
+\vspace*{7mm}
+\begin{minipage}{140mm}
+\includegraphics[width= #1 mm]{#2}\\
+{#3}\\[5mm]
+\end{minipage}
+}
+\newcommand{\Figure}[3]{
+\begin{center}
+\FigureL{#1}{#2}{#3}
+\end{center}
+}
+
+\newcounter{bibno}
+\newcommand{\mycite}[1]{[\ref{bib:#1}]}
+\newcommand{\mybibitem}[2]{
+  \refstepcounter{bibno}
+  \label{bib:#1}
+  \noindent
+  [\thebibno]
+  \begin{minipage}[t]{150mm}
+  #2
+  \end{minipage}
+  \vskip 5mm
+}
+
+\begin{document}
+
+\gtfamily
+\sffamily
+
+\thispagestyle{empty}
+
+% \mcfamily
+% \rmfamily
+
+\vspace*{40mm}
+\begin{center}
+{\Huge DS-CUDA ソフトウェアパッケージ\\[3mm]
+ユーザガイド}\\[10mm]
+
+\vspace*{5mm}
+{\LARGE for DS-CUDA version 1.2.2}\\
+
+\vspace*{10mm}
+{\large 最終更新 : 2012 年 9 月 24 日
+}
+\end{center}
+
+\bigskip
+
+\vfill
+
+%
+\hfill
+\begin{minipage}{80mm}
+    {\large
+      ~~川井 敦\\
+      ~~E-mail: kawai@kfcr.jp
+    }
+\end{minipage}
+
+\clearpage
+
+\vspace*{-3mm}
+\tableofcontents
+
+\clearpage
+
+\Section{本文書の概要}
+
+この文書では DS-CUDA ソフトウェアパッケージの使用方法を説明します。
+%
+DS-CUDA は PC の I/O スロットに接続された NVIDIA 社製 GPU カード(CUDAデ
+バイス) を、ネットワーク接続された他の PC からシームレスに使用するため
+のミドルウェアです。本バージョンは CUDA バージョン 4.1 で動作確認ずみですが、
+CUDA バージョン 4.1 の提供するすべての機能をサポートしているわけではありません
+(節 \ref{sec:compatibility} 参照)。
+
+
+以降、第 \ref{sec:overview} 章では DS-CUDA の基本構成と動作概要を説明し
+ます。第 \ref{sec:install} 章では DS-CUDA ソフトウェアパッケージ (以降
+「本パッケージ」と呼びます) のインストール方法を説明します。
+第\ref{sec:usage} 章ではアプリケーションプログラムのコンパイル方法、実
+行方法について説明します。第 \ref{sec:dscudainside} 章では DS-CUDA の実
+装や内部動作について触れます。
+
+なお以降では、本パッケージのルートディレクトリ ({\tt /{\it パッケージを
+    展開したディレクトリ}/dscudapkg{\it バージョン番号}/}) を {\tt
+  \$dscudapkg} と表記します。
+
+\Section{DS-CUDA 概観}\label{sec:overview}
+
+本節では DS-CUDA の基本構成と機能を概観します。
+
+\Subsection{機能概要}
+
+DS-CUDA を用いると、アプリケーションプログラムはネットワーク上に分散配
+置された GPU を透過的に扱えます。例えば下図の Client Node 上のアプリケー
+ションは、Client Node 自身にローカルにインストールされた GPU へアクセス
+する場合と同じプログラミングインタフェースを用いて Server Node に接続さ
+れた GPU へアクセスできます。
+
+\Figure{140}{gpucluster.eps}
+{図 : GPU クラスタの例。}
+
+\Subsection{システムの構成}
+
+もっとも単純な例として、PC 2 台と GPU 1 台からなるシステムを考えます。
+\vspace*{-7mm}
+%
+\Figure{100}{system1.eps}
+{図 : 最小構成の DS-CUDA システム。}
+%
+\vspace*{-5mm}
+
+このシステムは互いにネットワーク接続された 2 台の PC と、その一方にイン
+ストールされた GPU から構成されます。GPU は NVIDIA 社の CUDA に対応した
+製品 (CUDA デバイス) であることが必須です。ネットワーク接続には原則とし
+て InfiniBand の使用を想定します。ただし TCP/IP による通信が可能なネッ
+トワークであれば、InfiniBand 以外のものも使用できます (例:
+GigabitEthernet)。簡便のため、GPU を持つ側の PC を server node と呼び、
+もう一方の PC を client nodeと呼ぶことにします。
+
+DS-CUDA はユーザに対し、クライアント・サーバ型の実行環境を提供しま
+す。serve node 上ではサーバプログラム {\tt dscudasvr} を常時稼働させて
+おき (図中の server0)、client node 上のアプリケーションプログラム(図中
+の client) を {\tt dscudasvr} に対するクライアントとして実行します。サー
+バプログラムはアプリケーションプログラムの要求に従って GPU を制御します。
+
+\Subsection{ソフトウェア階層}
+
+DS-CUDA のソフトウェアは下図に示すように階層化されています。
+%
+\Figure{120}{softlayer.eps}
+{図 : ソフトウェア階層}
+%
+client node 上のユーザアプリケーションは CUDA API を用いて GPU (CUDA デ
+バイス) にアクセスします。内部的にはこれは server node 上のサーバプログ
+ラムへのアクセスに置き換えられますが、ユーザアプリケーションはそのこと
+を意識する必要はありません。クライアント・サーバ間の通信プロトコルに
+は InfiniBand Verb もしくはTCP/IP を使用します (図のソフトウェア階層
+は InfiniBand Verb を使用した場合のもの)。
+
+\Subsection{クライアントプログラムの生成}
+
+CUDA C/C++ で記述したユーザアプリケーションのソースコードを、
+本パッケージの提供する DS-CUDA プリプロセッサ {\tt dscudacpp} を用いてコ
+ンパイルすることにより、client node で動作するプログラムを生成します。
+
+\Subsection{冗長デバイス}\label{sec:reddev}
+
+DS-CUDA は冗長デバイスを扱えます。冗長デバイスとは複数の GPU を用いて構
+成された単一の仮想デバイスです。この仮想デバイス上で計算を実行すると、
+仮想デバイスを構成する複数の GPU 上で同一の計算が行われ、両者の結果が異
+なっていた場合には、その旨がユーザアプリケーションに通知されます。
+
+アプリケーションプログラムが一定の制約 (節 \ref{sec:errhandle} 参照) を
+満たすように記述されている場合には、誤りを検出した計算を自動的に再実行
+させることも可能です。
+
+\clearpage
+\Section{インストール}\label{sec:install}
+
+\Subsection{準備}
+
+本パッケージは以下のソフトウェアに依存しています。
+インストール作業の前に、これらの動作環境を整えて下さい。
+
+\begin{itemize}
+
+\item CUDA 開発ツール (CUDA 4.1 で動作確認済)\\
+{\tt http://www.nvidia.com/}
+
+\item C++ コンパイラ (g++ version 4.1.0 以降を推奨)\\
+{\tt http://gcc.gnu.org/}
+
+\item Ruby (version 1.8.5 以降を推奨)\\
+{\tt http://www.ruby-lang.org/}
+
+\item OFED (version 1.5.4 以降を推奨)\\
+{\tt https://www.openfabrics.org/resources/\verb+\+ \\
+ofed-for-linux-ofed-for-windows/linux-sources.html}
+
+\end{itemize}
+%
+
+\noindent
+注意 : 
+
+\begin{itemize}
+
+\item コンパイル対象とするアプリケーションプログラムが CUDA カーネル
+を C++ テンプレートとして実装している場合には、C++ コンパイラには
+g++ version 4.0.0 以上を使用してください。
+それ以前のバージョンや、Intel C++ コンパイラ等では動作しません。
+これは C++ テンプレートからシンボル名を生成する際の name mangling
+規則がコンパイラごとに異なっており、
+DS-CUDA では現在のところ g++ version 4 系の name mangling
+規則のみをサポートしているためです。
+
+\item ruby は {\tt /usr/bin/} にインストールして下さい。他のディレクト
+    リにインストールされている場合には {\tt /usr/bin/} へシンボリックリ
+    ンクを張って下さい。
+
+\item  {\tt /etc/security/limits.conf} に以下の2行を追記して下さい。
+%
+{
+\begin{verbatim}
+* hard memlock unlimited
+* soft memlock unlimited
+\end{verbatim}
+}
+
+この設定は root 権限を持たない一般ユーザが InfiniBand Verb 経由の
+通信を行うために必要です。
+
+\end{itemize}
+
+\Subsection{パッケージの展開}
+
+ソフトウェアパッケージ {\tt dscudapkg{\it n}.tar.gz} を展開してくださ
+い ({\it n} はバージョン番号)。パッケージには以下のファイルが含まれて
+います:
+
+\vspace*{3mm}
+\begin{tabular}{ll}
+  doc/                      & 本文書、その他のドキュメント。\\
+  scripts/                  & パッケージ管理ユーティリティ。\\
+  bin/                      & \\
+  ~~~~dscudacpp             & .cu ファイルから DS-CUDA クライアントを生成する\\
+                            & プリプロセッサ。\\
+  ~~~~dscudasvr             & DS-CUDA サーバ。\\
+  ~~~~ptx2symbol            & CUDA カーネルの name mangling されたシンボル名を取得\\
+                            & するスクリプト。{\tt libdscuda.a} が使用します。\\
+  include/                  & ヘッダファイル (DS-CUDA クライアント・サーバ共用)。\\
+  lib/                      & \\
+  ~~~~libdscuda\_ibv.a      & DS-CUDA ライブラリ (通信プロトコルに InfiniBand Verb を使用)。\\
+  ~~~~libdscuda\_rpc.a      & DS-CUDA ライブラリ (通信プロトコルに TCP/IP を使用)。\\
+  src/                      & DS-CUDA サーバ、ライブラリのソースコード。\\
+  misc/                     & サーバ構成指定ファイルの例、make ファイルのサンプル等。\\
+  sample/                   & アプリケーションプログラムの例。\\
+\end{tabular}\\
+
+\Subsection{環境変数の設定}
+
+以下の環境変数を設定してください。
+
+\vspace*{3mm}
+\begin{tabular}{ll}
+  \hline
+  client node, server node 共通 & \\
+  \hline
+  CUDAPATH             : & CUDA Toolkit のインストールされているパス。\\
+                         & デフォルト値は {\tt /usr/local/cuda}\\[3mm]
+  CUDASDKPATH          : & CUDA SDK のインストールされているパス。\\
+                         & デフォルト値は {\tt /usr/local/cuda/NVIDIA\_GPU\_Computing\_SDK}\\[3mm]
+  DSCUDA\_PATH         : & DS-CUDA ソフトウェアパッケージのインストールされて\\
+                         & いるパス。設定必須。デフォルト値はありません。\\[3mm]
+  DSCUDA\_WARNLEVEL    : & DS-CUDA サーバおよびクライアント実行時のメッセージ\\
+                         & 出力レベル。整数値を指定します。値が大きいほど詳細なメッ\\
+                         & セージが出力されます。デフォルト値は 2、最小値は 0 です。\\[3mm]
+  \hline
+  server node のみ       & \\
+  \hline
+  DSCUDA\_REMOTECALL     & 通信プロトコルを選択します。指定できる値は {\tt ibv}, {\tt rpc}\\
+                         & のいずれかです。それぞれ InfiniBand Verb, Remote Procedure Call \\
+                         & を意味します。\\[3mm]
+  \hline
+  client node のみ       & \\
+  \hline
+  LD\_LIBRARY\_PATH    : & 共有ライブラリパスに {\tt \$DSCUDA\_PATH/lib} を追加してください。\\
+                         & 設定必須。\\[3mm]
+  DSCUDA\_SERVER       : & DS-CUDA サーバが動作している PC の IP アドレス、\\
+                         & あるいはホスト名。デフォルト値は {\tt localhost}\\
+                         & 複数のサーバを使用する場合の記法については\\
+                         & 節 \ref{sec:cltconf} を参照して下さい。\\[3mm]
+  DSCUDA\_SERVER\_CONF : & DS-CUDA サーバが動作している PC の IP アドレス、あるいは\\
+                         & ホスト名を記述したファイルのファイル名。環境変数 \\
+                         & DSCUDA\_SERVER への設定値が長く煩雑になってしまう場合\\
+                         & (多数のサーバを使用する場合など) 、設定値をファイルに\\
+                         & 記述し、そのファイル名をこの環境変数で指定できます。\\[3mm]
+  DSCUDA\_AUTOVERB     : & 冗長デバイス上で自動再計算機能を使用する場合にこの変数を\\
+                         & 定義します。変数にはどのような値を設定しても構いません。\\[3mm]
+\hline
+\end{tabular}
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+例:
+kawai@localhost>export DSCUDA_PATH="/home/kawai/src/dscudapkg1.2.2"
+kawai@localhost>export DSCUDA_SERVER="192.168.10.101"
+kawai@localhost>export LD_LIBRARY_PATH=/home/kawai/src/dscudapkg1.2.2/lib:\
+$LD_LIBRARY_PATH
+\end{verbatim}
+\end{minipage}\\[3mm]
+
+\noindent
+CUDA や C コンパイラが参照する環境変数がある場合には、
+必要に応じてそれらも設定して下さい。
+
+\Subsection{ライブラリ・実行ファイルのビルド}
+
+ディレクトリ {\tt \$dscudapkg/src} へ移動し、{\tt make} を
+実行してください。DS-CUDA ライブラリ {\tt
+  \$dscudapkg/lib/libdscuda\_ibv.a}、{\tt
+  \$dscudapkg/lib/libdscuda\_rpc.a} とDS-CUDA サーバ {\tt
+  \$dscudapkg/bin/dscudasvr}が生成されます。
+
+\Subsection{動作チェック}
+
+{\tt \$dscudapkg/sample/} 内のサンプルプログラムを使用して、本パッケー
+ジの動作を確認します。
+
+\Subsubsection{サンプルプログラム}
+
+{\tt \$dscudapkg/sample/} 内に各種のサンプルプログラムが格納されています。
+
+\begin{itemize}
+\item {\tt vecadd}: ベクトルの加算を行います。
+\item {\tt direct}: 重力多体シミュレーションを行います
+({\tt make run} で初期条件を生成し、シミュレーション実行します)。
+\item {\tt claret}: 溶融塩のシミュレーションを行います。
+\end{itemize}
+%
+各ディレクトリ内で {\tt make} を実行すると、それぞれの DS-CUDA クラ
+イアントが生成されます。
+
+\Subsubsection{CUDA SDK サンプルプログラム (準備中)}
+
+\iffalse
+
+{\tt \$dscudapkg/NVIDIA\_GPU\_Computing\_SDK4.1/C/src/} 内に、NVIDIA 社の提供する
+CUDA SDK 4.1 に含まれている各種のサンプルプログラムのうち、グラフィクス関連の
+CUDA API を用いないものすべてが含まれています (全 56 種)。
+
+各サンプルプログラムのディレクトリ内には、DS-CUDA 用の make ファイ
+ルが {\tt Makefile.dscuda} というファイル名で用意されています。各ディレ
+クトリ内で {\tt make -f Makefile.dscuda} を実行すると、それぞれ
+の DS-CUDAクライアントが生成されます。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+kawai@localhost>pwd
+/home/kawai/src/dscuda1.2.2/NVIDIA_GPU_Computing_SDK4.1/C/src/reduction
+kawai@localhost>make -f Makefile.dscuda
+echo objs reduction_kernel.cu.o reduction.cpp.o      
+objs reduction_kernel.cu.o reduction.cpp.o
+echo src reduction_kernel.cu
+src reduction_kernel.cu
+/home/kawai/src/dscuda1.2.2/bin/dscudacpp -o reduction_kernel.cu.o  --ptxa
+...
+/usr/local/cuda4.1/cuda/bin/nvcc  --compiler-options -fPIC -m64 -o redu\
+ction -L/home/kawai/src/dscuda1.2.2/lib -L/home/kawai/src/cuda4.1/NVIDIA\
+_GPU_Computing_SDK/C/lib -L/home/kawai/src/cuda4.1/NVIDIA_GPU_Computing\
+_SDK/shared/lib reduction_kernel.cu.o reduction.cpp.o -ldscuda -lshrutil\
+_x86_64 -lcutil_x86_64
+kawai@localhost>
+\end{verbatim}
+\end{minipage}\\[5mm]
+
+なお全 56 種のうち、以下に示す 8 種のプログラムは DS-CUDA では動作しません。
+残り 48 種については動作確認済みです。
+
+\begin{itemize}
+
+\item transpose :
+このサンプルプログラム中では、以下に示すように、
+CUDA カーネルを関数ポインタ経由で呼び出しています。
+DS-CUDA はこのような記述を扱えません。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+    void (*kernel)(float *, float *, int, int, int);
+    ...
+    kernel = &copySharedMem;
+    ...
+    kernel<<<grid, threads>>>(d_odata, d_idata, size_x, size_y, 1);
+\end{verbatim}
+\end{minipage}
+
+\item 下表に示す 7 種のサンプルプログラムは、
+CUDA Toolkit の提供するライブラリを使用しています。
+これらのライブラリはその内部からリモート化されていない CUDA カーネルを呼び出しています。
+そのためこれらのサンプルプログラムを DS-CUDA を用いてコンパイルしても、正しく動作しません。
+
+\begin{center}
+\begin{tabular}{ll}
+\hline
+サンプルプログラム名              & 依存するライブラリ \\
+\hline
+\hline
+\tt conjugateGradient             & \tt libcublas.so\\
+\tt convolutionFFT2D              & \tt libcufft.so\\
+\tt simpleCUFFT                   & \tt libcufft.so\\
+\tt MonteCarloCURAND/EstimatePiQ  & \tt libcurand\\
+\tt MonteCarloCURAND/EstimatePiP  & \tt libcurand\\
+\tt lineOfSight                   & \tt libcudpp\_x86\_64\\
+\tt radixSort                     & \tt libcudpp\_x86\_64\\
+\hline
+\end{tabular}
+\end{center}
+
+\end{itemize}
+
+\fi
+
+\clearpage
+
+\Section{使用方法}\label{sec:usage}
+
+\Subsection{アプリケーションプログラムのビルド}\label{sec:build}
+
+CUDA C/C++ で記述されたユーザアプリケーションのソースコード (以下
+{\tt .cu} ファイルと表記します) から DS-CUDA クライアントを生成する
+には、DS-CUDA プリプロセッサ {\tt \$dscudapkg/bin/dscudacpp} を使用します。
+
+{\tt dscudacpp} を引数を与えずに実行すると、使用方法が表示されます。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+kawai@localhost>pwd
+/home/kawai/src/dscuda1.2.2/sample/direct
+kawai@localhost>../../bin/dscudacpp
+No input file given.
+  usage: ../../bin/dscudacpp [options] inputfile(s)...
+  options:
+      --infile <file>   : a .cu input file.
+      -i <file>
+
+      -o <file>         : an output file.
+
+      --verbose[=level] : be verbose. the level can optionally be given. [2]
+      -v[level]           the higher level gives the more verbose messages. \
+  level 0 for silence.
+
+      --help            : print this help.
+      -h
+  Note that all options not listed above are implicitly passed on to nvcc.
+
+\end{verbatim}
+\end{minipage}\\[5mm]
+%
+{\tt dscudacpp} へ {\tt .cu} ファイルを与えるには、オプションスイッチ {\tt -i }
+を使用します。また、生成される DS-CUDA クライアントは、オ
+プションスイッチ {\tt -o} で指定します。その他の入力ファイル ({\tt .o}
+や {\tt .c} など) はオプションスイッチ無しにファイル名だけを引数として
+与えます。これら以外のすべての引数やオプションスイッチは、{\tt
+  dscudacpp} では解釈されずに、{\tt dscudacpp} が内部的に起動する {\tt
+  nvcc} へと渡されます。{\tt nvcc} が必要とする引数は、すべて {\tt
+  dscudacpp} への引数として渡さねばなりません。また
+以下の引数を与えて DS-CUDA ライブラリをリンクする必要があります。
+
+\begin{itemize}
+\item 通信プロトコルとして InfiniBand Verb を用いる場合:\\
+{\tt -ldscuda\_ibv -libverbs -lrdmacm -lpthread}
+\item 通信プロトコルとして TCP/IP を用いる場合:\\
+{\tt -ldscuda\_rpc}
+\end{itemize}
+
+\vspace*{5mm}
+例えば、本パッケージ付属のサンプルプログラム {\tt \$dscudapkg/sample/vecadd/} の
+クライアント {\tt userapp} を生成するには、下記の引数が必要です (通信プロトコルとして
+InfiniBand Verb を用いる場合)。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+kawai@localhost>pwd
+/home/kawai/src/dscuda1.2.2/sample/vecadd
+kawai@localhost>../../bin/dscudacpp -o userapp -I. -i userapp.cu \
+-ldscuda\_ibv -libverbs -lrdmacm -lpthread
+\end{verbatim}
+\end{minipage}\\[5mm]
+%
+
+\vspace*{15mm}
+\noindent
+\begin{minipage}{150mm}
+\baselineskip=14pt
+%\baselineskip=14pt \lineskiplimit=-\maxdimen
+
+参考 : {\tt dscudacpp} は以下の C プリプロセッサマクロ定数を定義します。
+定数はソースコード中で参照できます。\\
+
+\begin{center}
+\begin{tabular}{ll}
+\hline
+定数名                               & 値 \\
+\hline
+\hline
+{\tt \_\_DSCUDA\_\_}                  & 1 \\
+{\tt \_\_DSCUDACPP\_VERSION\_\_}       & バージョン番号 \\
+                                     & (例 : バージョン 1.2.3 の値は 0x010203) \\
+\hline
+\end{tabular}\\
+\end{center}
+
+\end{minipage}\\[5mm]
+%
+
+\Subsection{アプリケーションプログラムの実行}
+
+client node 上でアプリケーションプログラムを実行するには、server node
+上で事前にサーバプログラムを起動しておく必要があります。
+
+またこれまでは簡単のために 1 台の GPU がインストールされ
+た 1 台の server node のみを考えてきましたが、複数の server node を持つ
+システム (例えば下図) の場合には、 client node のアプリケーションプログ
+ラムの使用する GPU を client node 側で指定する必要があります。
+以下ではこれらの設定方法について説明します。
+
+\vspace*{-7mm}
+%
+\Figure{100}{system2.eps}
+{図 : 複数の GPU を持つシステムの例。}
+\vspace*{-5mm}
+
+\Subsubsection{Sever node の設定}\label{sec:svrconf}
+
+client node が使用するすべての server node 上で、GPU を制御するためのサー
+バプログラム (より正確にはプロセス) を起動します。1 台の GPU につき 1 つの
+サーバプログラムが必要です。
+
+サーバプログラムの実行ファイルは {\tt \$dscudapkg/bin/dscudasvr} です。
+これをコマンドラインから実行します。1 台の server node に複数の GPU が
+インストールされている場合には、実行時にサーバプログラム自身
+の ID と GPU のデバイス ID を次のように指定してください:
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\tt
+dscudasvr -s {\it server\_id} -d {\it device\_id}
+
+\end{minipage}\\[5mm]
+%
+ここで {\it server\_id} はサーバプログラムの ID (サーバ ID) です。
+この ID は client node 上のアプリケーションプログラムが
+通信相手を特定するために使用します。各 server node 内でユニークな、
+小さな非負整数 (特別な理由のない限り 0, 1, 2, ...) を割り当ててください。
+%
+{\it device\_id} は {\tt dscudasvr} が制御する GPU を特定する際に使用す
+る GPU のデバイス ID です。この ID は NVIDIA のドライバによって各 GPU
+に自動的に割り振られます。1 台の server node 内に $n$ 個の GPU が
+インストールされている場合、各 GPU には 0 から $n-1$ までのいずれかの値
+がユニークに割り当てられます。割り当て状況を確認するには、例えば CUDA
+SDK に含まれる {\tt deviceQuery} 等を使用して下さい。
+
+\Subsubsection{Client node の設定}\label{sec:cltconf}
+
+client node 側は、アプリケーションプログラムがどの server node 上のどの
+サーバプログラムと通信するかを、環境変数 {\tt DSCUDA\_SERVER} によって
+指定します。{\tt DSCUDA\_SERVER} には以下の書式に従って記述した文字列を設
+定します。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\tt
+{\it server\_node}:{\it server\_id}
+\end{minipage}\\[5mm]
+%
+ここで {\it server\_node} は server node の IP アドレスあるいはドメイン
+名です。{\it server\_id} はサーバプログラムの ID (節 \ref{sec:svrconf}
+参照) です。次の例のように複数のサーバプログラムを空白で区切って列挙すると、
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\tt
+192.168.0.100:0 192.168.0.100:1 192.168.0.105:0 192.168.0.107:1
+\end{minipage}\\[5mm]
+%
+アプリケーションプログラムからは複数の GPU があるように見えます。アプリケーショ
+ンプログラムから見える仮想的な GPU (以降仮想デバイスと呼びます) のデバ
+イス ID は、列挙した順に 0, 1, 2, ...が割り振られます。
+
+冗長デバイス (節 \ref{sec:reddev} 参照) を構成するには、複数のサーバプ
+ログラムを空白ではなくカンマで区切って列挙します。例えば
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\tt
+192.168.0.100:0,192.168.0.100:1,192.168.0.105:0
+\end{minipage}\\[5mm]
+%
+は、server node 192.168.0.100 にインストールされ
+た 2 枚の GPU と 192.168.0.105 にインストールされた 1 枚の GPU、合計 3
+枚の GPU を用いて 1 台の冗長デバイスを構成します。
+
+空白区切りとカンマ区切りを混在することも可能です。例えば
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\tt
+mysvr0:0 mysvr0:1,mysvr1:0 mysvr2:0 
+\end{minipage}\\[5mm]
+%
+は、合計 4 台の GPU を用いて、通常の仮想デバイス 2 台と冗長デバイス 1 台、
+合計 3 台の仮想デバイスを構成します。
+
+\Subsection{冗長デバイスによる誤り検出と自動再計算}\label{sec:errhandle}
+
+冗長デバイス (節 \ref{sec:reddev}、節 \ref{sec:cltconf}) を用いて計算を行うと、
+冗長デバイスを構成する複数の GPU 上で同一の計算が実行され、
+それらの結果が一致するかどうかが検証されます。
+一致しなかった場合には、いずれかの GPU で行われた計算の結果が誤っていた
+と見なされ、あらかじめ設定しておいたエラーハンドラが呼び出されます。
+
+\Subsubsection{エラーハンドラの設定}
+
+エラーハンドラの設定には DS-CUDA の提供する API、{\tt dscudaSetErrorHandler()} を用います。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+書式:\\
+\tt
+void dscudaSetErrorHandler(void (*{\it handler})(void *), void *{\it handler\_arg})\\
+\end{minipage}\\
+
+引数 {\it handler} に、エラーハンドラへのポインタを渡します。
+エラーハンドラは {\tt void *} 型の引数をひとつ取れます。
+この引数を引数 {\it handler\_arg} として与えます。
+引数が不要の場合には {\tt NULL} を与えてください。
+
+\vspace*{15mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt
+%\baselineskip=14pt \lineskiplimit=-\maxdimen
+
+参考 : 同一のアプリケーションプログラムを、ソースコードを変更すること無
+くDS-CUDA プリプロセッサ {\tt dscudacpp} と従来の CUDA コンパイラ {\tt
+  nvcc} の両方で処理できるようにするためには、以下に示すように C プリプ
+ロセッサディレクティブを用いて{\tt dscudaSetErrorHandler()} の呼び出し
+を保護してください。
+
+\begin{verbatim}
+#ifdef __DSCUDA__
+    dscudaSetErrorHandler(errhandler, (void *)&data);
+#endif
+\end{verbatim}
+
+\noindent
+ここで {\tt \_\_DSCUDA\_\_} は {\tt dscudacpp} が自動的に定義する定数マクロです
+(節 \ref{sec:build} 参照)。
+
+\end{minipage}\\[3mm]
+
+\Subsubsection{自動再計算}
+
+DS-CUDA には自動再計算機能が実装されています。つまり、計算結果に誤りが
+生じた場合にその計算を自動的に再実行させることが出来ます。
+GPU に恒久的な故障が生じた場合には再実行は無意味ですが、確率的にまれに生じる
+計算の誤りであれば、再実行によって訂正できる場合があります。
+
+自動再計算機能を用いるには環境変数 {\tt DSCUDA\_AUTOVERB} を定義してく
+ださい。変数は定義さえされていれば、値はどのような値を設定しても構いません。
+
+ただし自動再計算は任意のアプリケーションプログラムで正しく機能するわけ
+ではありません。自動再計算機能は以下の手順で再計算を行います。
+%
+\begin{itemize}
+\item[(1)] アプリケーションプログラムの実行中は、CUDA API の呼び出しが行われ
+    るたびにその呼び出し履歴 (つまり API 名とすべての引数) を内部バッファ
+    に保存します (ただし現在のところ保存するのはホスト-GPU 間のデータ転
+    送を行う CUDA API とカーネル実行のみ)。
+
+\item[(2a)] GPU の計算結果をデバイスからホストへの {\tt cudaMemcpy()} による
+    データ転送 (以降 D2H と表記します) によってホストへ回収する際に、回
+    収結果が正しければ過去の呼び出し履歴を消去します。
+
+\item[(2b)] 回収結果が誤っていれば過去の呼び出し履歴を順に再実行します。
+
+\end{itemize}
+%
+自動再計算が正しく機能するためには、この手順で再計算を行った時に正しい
+結果を返すようにアプリケーションプログラムが記述されている必要がありま
+す。つまり GPU 上の計算結果が、直近の D2H から次の D2H までの間の CUDA
+API 呼び出しだけに依存していることが必要です。
+
+例えば GPU 上の特定の変数を毎ステップインクリメントさせるプログラムでは、
+自動再計算は正しく動作しません。再計算を行った時に、その変数が
+余分にインクリメントされてしまいます。
+
+\clearpage
+
+\iffalse
+
+\Section{性能実測}\label{sec:perf}
+
+DS-CUDA ライブラリと、それを使用した DS-CUDA クライアントの実測
+性能を以下に示します。測定に使用したリモート GPU は GeForce GTX280 です。
+\vspace*{-5mm}
+
+\Subsection{DS-CUDA ライブラリの通信性能}
+
+\begin{tabular}{rrrrr}
+\hline
+データ長 (byte)   & \multicolumn{2}{l}{ローカル $\Rightarrow$ リモート} & \multicolumn{2}{l}{ローカル $\Leftarrow$ リモート} \\
+                  & InfiniBand & 100Base                        & InfiniBand & 100Base \\
+                  &            &                                &            & (MB/s) \\
+\hline
+\hline
+    128 &   1.8 &  0.3 &   1.8 &   0.5 \\
+    281 &   3.9 &  0.7 &   3.9 &   0.7 \\
+    619 &   8.4 &  1.4 &   8.4 &   2.0 \\
+   1362 &  17.9 &  2.7 &  17.7 &   2.7 \\
+   2998 &  36.4 &  3.7 &  35.1 &   3.7 \\
+   6596 &  71.5 &  6.2 &  67.6 &   6.2 \\
+  14512 & 123.2 &  8.0 & 113.1 &   8.0 \\
+  31927 & 185.1 &  9.6 & 164.7 &   9.6 \\
+  70241 & 247.0 & 10.1 & 197.3 &  10.6 \\
+ 154530 & 386.1 & 11.2 & 305.9 &  11.2 \\
+ 339967 & 509.3 & 11.5 & 396.4 &  11.5 \\
+ 747927 & 590.1 & 11.5 & 466.7 &  11.5 \\
+1645440 & 639.9 & 11.0 & 493.0 &  10.9 \\
+3619968 & 667.1 & 10.8 & 453.8 &  10.8 \\
+7963931 & 678.4 &  9.8 & 452.7 &   9.8 \\
+\hline
+\end{tabular}
+
+\Subsection{アプリケーションプログラム {\tt claret} の実効性能}
+
+\begin{tabular}{rrrrrrr}
+\hline
+          & \multicolumn{3}{l}{改良版}                & \multicolumn{3}{l}{オリジナル} \\
+粒子数    & ローカル & \multicolumn{2}{l}{リモート}   & ローカル & \multicolumn{2}{l}{リモート} \\
+          &          & InfiniBand  & 100Base          &          & InfiniBand  & 100Base \\
+          &          &             &                  &          &             & (Gflops) \\
+\hline
+\hline
+     8    &        0 &          0  &                0 &        0 &           0 &                0 \\
+    64    &        1 &          0  &                0 &        1 &           0 &                0 \\
+   216    &        6 &          3  &                1 &        6 &           2 &                0 \\
+   512    &       16 &         10  &                3 &       13 &           6 &                1 \\
+  1000    &       33 &         24  &                8 &       29 &          17 &                4 \\
+  1728    &       57 &         46  &               18 &       52 &          35 &               11 \\
+  2744    &       89 &         75  &               33 &       84 &          63 &               22 \\
+  4096    &      130 &        110  &               52 &      125 &          99 &               39 \\
+  5832    &      174 &        150  &               77 &      170 &         136 &               60 \\
+\hline
+\end{tabular}
+
+\noindent
+注意 : オリジナル版の claret は、タイムステップ毎にデバイスメモリの確保
+{\tt cudaMalloc()} と解放 {\tt cudaFree()} を行っていますが、これらは粒子
+数が変わらない限りは不要です。改良版はメモリの確保と解放を必要最小限に抑え
+たものです。
+
+\clearpage
+
+\fi
+
+\Section{DS-CUDA 実装の詳細}\label{sec:dscudainside}
+
+\Subsection{CUDA ランタイムライブラリのサポート範囲}\label{sec:compatibility}
+
+DS-CUDA は CUDA ランタイムライブラリのすべての機能や API を仮想化するわけでは
+ありません。以下の条件に該当するものを含むいくつかの機能および API は、現在のところ仮想化されていません。
+
+\begin{itemize}
+\item グラフィクス制御を伴う API。\\例: {\tt cudaGraphicsGLRegisterBuffer()}
+\item カーネル実行に関する API。\\例: {\tt cudaLaunch()}
+\item 非同期 API。\\例: {\tt cudaMemcpyAsynch()}
+\item GPU 間のデータ転送。\\例: {\tt cudaMemcpy(..., cudaMemcpyDeviceToDevice),\\ cudaDeviceEnablePeerAccess()}\item Unified Virtual Addressing を前提としたメモリ操作 API。\\例: {\tt cudaMemcpy(..., cudaMemcpyDefault)}
+\item GPUDirect 関連機能
+\end{itemize}
+%
+
+\Subsection{CUDA C/C++ 文法のサポート範囲}
+
+DS-CUDA は CUDA C/C++ コンパイラでコンパイル可能なすべての
+ソースコードを扱えるわけではありません。
+現在のところ、アプリケーションプログラムのソースコードが
+以下の条件に該当する記述を含む場合には、そのソースコードは
+処理できません。
+
+\begin{itemize}
+
+\item CUDA カーネルを関数ポインタ経由で呼び出す記法。
+
+\vspace*{5mm}
+\hspace*{5mm}
+\begin{minipage}{150mm}
+\baselineskip=14pt \lineskiplimit=-\maxdimen
+\begin{verbatim}
+  例)
+    void (*kernel)(...);
+
+    __global__ void myKernel(...)
+    {
+      ....
+    }
+    ...
+    void main(void)
+    {
+      kernel = myKernel;
+      ...
+      kernel<<<grid, threads>>>(...);
+    }
+\end{verbatim}
+\end{minipage}
+
+\end{itemize}
+%
+
+
+\Subsection{InfiniBand Verb インタフェース}
+
+DS-CUDA の InfiniBand Verb インタフェースは OFED の提供する C 言語ライ
+ブラリ関数を用いて記述されています。ライブラリの詳細については OFED の
+提供するドキュメントを参照して下さい。
+
+\Subsection{RPC インタフェース}
+
+DS-CUDA の RPC インタフェースは XDR 言語を用いて{\tt
+  \$dscudapkg/src/dscudarpc.x} 内に記述されています。この記述を {\tt
+  rpcgen} によってコンパイルすると、クライアントスタブ {\tt
+  \$dscudapkg/src/dscudarpc\_clnt.c}、サーバスタブ {\tt
+  \$dscudapkg/src/dscudarpc\_svc.c} などが生成されます。XDR や {\tt
+  rpcgen} の詳細については別途資料をあたって下さい。
+
+通常、RPC インタフェースの TCP/IP ポート番号はポートマッパによって動的
+に割り当てられますが、DS-CUDA は常にポート番号 65432 を使用します(ssh
+によるトンネリングを可能とするため)。ポート番
+号 65432 は\$dscudapkg/src/dscudadefs.h 内にプリプロセッサマクロ
+{\tt RC\_IP\_PORT\_BASE} の値として定義されています。必要に応じて変更して
+下さい。
+
+\Subsection{Client node から server node への CUDA カーネルの転送}
+
+{\tt .cu} ファイル内で定義された CUDA カーネル関数は、{\tt dscudacpp}
+によって抽出され、{\tt dscudacpp} はこれを オプションスイッチ {\tt
+  --ptx }とともに {\tt nvcc} へ渡し、{\tt PTX} 形式 (高レベルアセンブリ
+記述) の記述へ変換します。変換された {\tt PTX} 記述はカレントディレクト
+リに {\tt .ptx} ファイルとして保存されます。
+
+client node 上のアプリケーションプログラムがカーネル呼び出しを実行する
+と、client node から上記の {\tt .ptx} ファイルがカーネルイメージとし
+て server node 上のサーバプログラム {\tt dscudasvr} へ転送されます。サー
+バプログラムは CUDA ドライバ API のひとつ、{\tt cuModuleLoadData()} を
+使用してこのイメージを GPU へロードし、{\tt cuModuleGetFunction()} を使
+用してカーネル関数を取り出します。
+
+カーネル関数への引数は別途アプリケーションプログラムから転送されます。サーバは {\tt
+  cuParamSetv(), cuParamSeti(), cuParamSetf(), cuParamSetSize()} を使用
+してこれらの引数をカーネル関数のコンテクストにセットします。その後、ブ
+ロックの情報を {\tt cuFuncSetBlockShape()} によって設定し、{\tt
+  cuLaunchGrid()} によってカーネル関数を起動します。
+
+以上の動作は {\tt \$dscudapkg/src/dscudasvr.cu} 内の {\tt
+  dscudaLaunchKernel()} に記述されています。
+
+\Section{利用許諾}\label{sec:license}
+\vspace*{5mm}
+
+DS-CUDA ソフトウェアパッケージの利用条件についてはファイル {\tt 00license-j} をご確認下さい。
+
+\Section{DS-CUDA ソフトウェアパッケージ更新履歴}\label{sec:history}
+\vspace*{5mm}
+
+\begin{tabular}{llll}
+\hline
+version & date & description\\
+\hline\\[-1mm]
+1.2.3   & 24-Sep-2012 & 一般公開向けに利用許諾等を整備。\\[3mm]
+1.2.1   & 09-Aug-2012 & 初版作成。\\[3mm]
+\hline
+\end{tabular}\\[5mm]
+
+\end{document}

@@ -1,0 +1,45 @@
+====================================
+ DS-CUDA Software Package
+====================================
+
+DS-CUDA is a middleware that provide seamless access to NVIDIA's GPUs
+distributed over a network. Using this middleware, the user can handle
+GPUs attached to remote PCs, as if they were locally installed.
+
+DS-CUDA Software Package is freely available under the GPLv3.
+See '00license-e' for the details.
+
+See '00readme-e', 'doc/quickstart' and 'doc/userguide-e.pdf'
+(in preparation) for installation and usage.
+
+This version is tested on CUDA version 4.1. APIs and functions
+provided by CUDA 4.1 are, however, not fully supported. See 
+'./doc/userguide-e.pdf' for details.
+
+Modification History:
+-----------------------------------------------------------------------------
+version  date         note
+-----------------------------------------------------------------------------
+1.3.1    13-Feb-2013  A bug on multiple server launch via daemon fixed.
+
+1.3.0    08-Feb-2013  A bug in dscudacpp on kernel call substitution fixed.
+
+1.2.9    05-Feb-2013  daemonized. servers(dscudasvr) are now automatically
+                      spawnded by the daemon (dscudad).
+
+1.2.7    13-Dec-2012  . A directive '#pragma dscuda cpp' introduced
+                        in order to help cpp-macro expansion in source codes.
+                      . Device code is now embedded into the host code and
+                        a separate .ptx file is not necessary anymore.
+
+                      . Linkage with CHARMM tested.
+
+1.2.6    21-Nov-2012  . Support for 32-bit linux.
+                      . Header search path for dscudacpp changed.
+                      . Memory leak in the client library fixed.
+                      . Dead lock in the server fixed.
+
+1.2.3    24-Sep-2012  Public release.
+
+1.2.1    09-Aug-2012  Created.
+-----------------------------------------------------------------------------

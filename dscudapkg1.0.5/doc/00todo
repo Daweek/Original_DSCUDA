@@ -1,0 +1,90 @@
+========================================================================
+Applications do not work with Rcuda 2.0.0:
+
+Applications relying on libraries which internally uses CUDA APIs:
+
+-------------------------------------------------------------------------------
+App.                          relies on         note
+-------------------------------------------------------------------------------
+conjugateGradient             libcublas.so      a CUBLAS API call hangs up.
+
+convolutionFFT2D              libcufft.so       a CUFFT API call hangs up.
+
+simpleCUFFT                   CUDA FFT library  a CUFFT API call hangs up.
+
+
+lineOfSight                   libcudpp_x86_64   uses cudaConfigureCall(), which mean the
+                                                library invokes its own kernel(s).
+
+radixSort                     libcudpp_x86_64   uses cudaConfigureCall().
+
+MonteCarloCURAND/EstimatePiQ  libcurand         uses cudaConfigureCall().
+
+MonteCarloCURAND/EstimatePiP  libcurand         uses cudaConfigureCall().
+-------------------------------------------------------------------------------
+
+
+Applications with kernels written using pointer:
+
+  eg) void (*kernel)(void);
+      kernel<<<g,b>>>();
+
+transpose
+
+========================================================================
+Applications worked with Rcuda:
+
+deviceQuery
+BlackScholes
+SobolQRNG
+clock
+cppIntegration
+dwtHaar1D
+dxtc
+eigenvalues
+fastWalshTransform
+histogram
+
+simpleVoteIntrinsics
+sortingNetworks
+template
+simpleMultiGPU
+matrixMul
+scalarProd
+scan
+simpleAtomicIntrinsics
+simpleMPI
+FDTD3d
+
+simpleStreams
+simpleMultiCopy
+asyncAPI
+concurrentKernels
+bandwidthTest
+simpleZeroCopy
+vectorAdd
+convolutionSeparable
+MersenneTwister
+simplePrintf
+
+convolutionTexture
+simpleTexture
+dct8x8
+simplePitchLinearTexture
+simpleTemplates
+mergeSort
+threadFenceReduction
+MonteCarloCURAND/SingleAsianOptionP
+MonteCarloCURAND/EstimatePiInlineP
+MonteCarloCURAND/EstimatePiInlineQ
+
+alignedTypes
+dct8x8
+binomialOptions
+reduction
+quasirandomGenerator
+MonteCarlo
+MonteCarloMultiGPU
+Interval
+
+========================================================================
