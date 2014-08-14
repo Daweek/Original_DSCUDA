@@ -1,0 +1,1 @@
+/usr/local/cuda-5.5/bin/nvcc -dc -arch sm_35 -I/usr/local/cuda-5.5/samples/common/inc -c -o libdscuda_tcp.o libdscuda_tcp.cu

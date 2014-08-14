@@ -1,0 +1,66 @@
+====================================
+ DS-CUDA Software Package
+====================================
+
+DS-CUDA is a middleware that provide seamless access to NVIDIA's GPUs
+distributed over a network. Using this middleware, the user can handle
+GPUs attached to remote PCs, as if they were locally installed.
+
+DS-CUDA Software Package is freely available under the GPLv3.
+See '00license-e' for the details.
+
+See '00readme-e', 'doc/quickstart' and 'doc/userguide-e.pdf'
+(in preparation) for installation and usage.
+
+This version is tested on CUDA version 5.5. APIs and functions
+provided by CUDA 5.5 are, however, not fully supported. See 
+'./doc/userguide-e.pdf' for details.
+
+Modification History:
+-----------------------------------------------------------------------------
+version  date         note
+-----------------------------------------------------------------------------
+1.7.5    25-Mar-2014  A DS-CUDA custom API dedicated for sorting, dscudaSortByKey() implemented.
+                      For now DS-CUDA cannot handle Thrust library. The new API can be used as
+                      an alternative to thrust::sort_by_key().
+
+1.7.4    19-Mar-2014  Binary compatibile shared library supported for CUDA5.0 for Fermi.
+                      Does not work on Kepler.
+
+1.7.3    05-Mar-2014  Auto server search function integrated.
+                      sockutil.c:setupSockaddr() bug fixed.
+
+1.7.0    26-Dec-2013  Some APIs added including texture reference management functions.
+
+1.6.0    19-Dec-2013  --cpp switch introduced for clients in environment w/o CUDA.
+                      RPC framework is no longer necessary.
+
+1.5.0    07-Aug-2013  header file expansion automated.
+
+1.4.3    18-Jul-2013  can be build on CUDA5.0.
+
+1.4.2    17-Jun-2013  cudaMemcpyPeer() implemented altough unstable yet.
+
+1.3.1    13-Feb-2013  A bug on multiple server launch via daemon fixed.
+
+1.3.0    08-Feb-2013  A bug in dscudacpp on kernel call substitution fixed.
+
+1.2.9    05-Feb-2013  daemonized. servers(dscudasvr) are now automatically
+                      spawnded by the daemon (dscudad).
+
+1.2.7    13-Dec-2012  . A directive '#pragma dscuda cpp' introduced
+                        in order to help cpp-macro expansion in source codes.
+                      . Device code is now embedded into the host code and
+                        a separate .ptx file is not necessary anymore.
+
+                      . Linkage with CHARMM tested.
+
+1.2.6    21-Nov-2012  . Support for 32-bit linux.
+                      . Header search path for dscudacpp changed.
+                      . Memory leak in the client library fixed.
+                      . Dead lock in the server fixed.
+
+1.2.3    24-Sep-2012  Public release.
+
+1.2.1    09-Aug-2012  Created.
+-----------------------------------------------------------------------------

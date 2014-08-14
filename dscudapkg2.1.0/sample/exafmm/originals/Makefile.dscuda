@@ -1,0 +1,47 @@
+.SUFFIXES: .cu
+
+NVCCOPT = -g -use_fast_math -arch=sm_35 -rdc=true
+NVCC = nvcc $(NVCCOPT)
+LFLAGS = -lcudadevrt
+LFLAGS += -DMASS # Use all positive sources
+
+CPP              = g++ -g
+CUDAPATH        ?= /usr/local/cuda/
+CUDALIBPATH      = $(CUDAPATH)/lib64
+DSCUDAPATH      ?= ../..
+DSCUDACPP        = $(DSCUDAPATH)/bin/dscudacpp
+DSCUDALIBPATH    = $(DSCUDAPATH)/lib
+INCLUDES         = -I. -I$(CUDASDKPATH)/common/inc
+
+CLIENT           = serial
+SERVER           = dscudasvr
+TARGETS          = $(CLIENT)_ibv $(CLIENT)_tcp $(SERVER)
+
+
+SRC = thrust.cu serial.cu
+
+OBJ = $(SRC:%.cu=%.o)
+SVROBJ = $(SRC:%.cu=%.svr.o)
+
+all:   $(TARGETS)
+
+dscudasvr:	$(SVROBJ) $(DSCUDALIBPATH)/libdscudasvr.a
+	$(NVCC) -o $@ $^ -L$(CUDALIBPATH) -lcudadevrt -lcuda -lrdmacm -libverbs -lpthread
+
+$(CLIENT)_ibv: $(OBJ)
+	$(NVCC) --cudart=shared -o $@ $^ -L$(DSCUDALIBPATH) -ldscuda_ibv -lrdmacm -libverbs -lpthread -lcudart $(LFLAGS)
+
+$(CLIENT)_tcp:	$(OBJ)
+	$(NVCC) --cudart=shared -o $@ $^ -L$(DSCUDALIBPATH) -ldscuda_tcp -lcudart $(LFLAGS)
+
+%.o: %.cu
+	$(DSCUDACPP) $(NVCCOPT) -c -I. -o $@ -i $< $(LFLAGS)
+
+%.svr.o: %.cu
+	$(NVCC) $(INCLUDES) -DNOMAIN -c -I. -o $@ $<
+
+clean:
+	rm -f serial.o
+
+cleanall:
+	rm -rf *.o *.out ./dscudatmp $(TARGETS)

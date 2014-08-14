@@ -1,0 +1,234 @@
+#!/usr/bin/ruby -w
+
+$LOAD_PATH.unshift("#{File.dirname($0)}/../lib/")
+
+require 'English'
+
+# DS-CUDA modules
+require 'utility'
+include Utility
+
+@verbose = (ENV['DSCUDA_WARNLEVEL'] ? ENV['DSCUDA_WARNLEVEL'] : 2).to_i
+
+
+# parse a __PRETTY_FUNCTION__.
+# returns: namespaces, tpltparams, rettype, name, argtypes.
+# e.g.)  in  void hoe::vecAddT(T1*, T1*, T0*) [with T0 = float, T1 = double]
+#        out namespaces: [hoe]
+#            tpltparams: {T0 => float, T1 => double}
+#            rettypes  : [void]
+#            name      : vecAddT
+#            argtypes  : [T1*, T1*, T0*]
+#
+
+def parse_pretty_function(prettystr)
+  predefined_types = %w[
+     bool char double long float unsigned int short void
+  ]
+
+  vputs(3, "prettystr:#{prettystr}\n")
+  prettystr =~ %r{
+                   ((?:\w+ \s+)*)           # $1: return type, e.g., static void
+                   ((?:\w+\:\:)*)           # $2: namespace qualifier, e.g., hoe::, std::
+                   (\w+) \s*                # $3: function name, e.g., vecAddT
+                   \( (.*) \) \s*           # $4: function args, e.g., "T1*, T1*, T0*"
+                   (?: \[ \s* with \s* (.*) \])*  # $5: list of template arg=parameter, e.g., "T0 = float, T1 = double"
+                 }xms
+
+=begin
+  printf("rettype    $1:#{$1}\n")
+  printf("namespaces $2:#{$2}\n")
+  printf("func name  $3:#{$3}\n")
+  printf("func args  $4:#{$4}\n")
+  printf("tpltparams $5:#{$5}\n")
+=end
+
+  rettypes = $1 || ""
+  namespaces = $2 || ""
+  name = $3 || ""
+  argtypes = $4 || ""
+  keyvals = $5 || ""
+
+  namespaces = namespaces.split(/\:\:/)
+  rettypes   = rettypes.split(/\s+/)
+  argtypes   = argtypes.split(/\s*,\s*/)
+  keyvals    = keyvals.split(/\s*,\s*/)
+  structs    = argtypes.dup
+
+  # extract user defined types.
+  structs = structs.collect { |struct|
+    struct = struct.gsub(/(:? \* | const)/xms, '')
+    struct = struct.gsub(/\s+/, '')
+    struct.split(/\s+/).size == 1 ? struct : nil
+  }.compact
+
+  structs = structs.select { |struct|
+    !predefined_types.include?(struct.gsub(/\*/, ''))
+  }.uniq
+
+=begin
+  p rettypes
+  p namespaces
+  p name
+  p argtypes
+  p keyvals
+  p structs
+=end
+  tpltargs = []
+  tpltparams = []
+  keyvals.each {|keyval|
+    keyval =~ /((?: \w+ \s*)+) \s* = \s* ( (?: \w+ | '\w') )/xms
+    arg = $1
+    param = $2
+    arg = arg.gsub(/\s+\z/, '')
+    tpltargs.push(arg)
+    tpltparams.push(param)
+  }
+=begin
+  p tpltargs
+  p tpltparams
+=end
+  return namespaces, rettypes, tpltargs, tpltparams, name, argtypes, structs
+end
+
+
+
+def pretty_function_to_mangled_name(pfstr)
+
+  namespaces, rettypes, tpltargs, tpltparams, name, argtypes, structs = parse_pretty_function(pfstr)
+
+  symstr = '_Z'
+
+  # append name space.
+  if (!namespaces.empty?)
+    if (namespaces[0] !~ /_GLOBAL__N__/)  # ignore unnamed namespace.
+      symstr += 'N'
+      namespaces.each { |ns|
+        symstr += ns.size.to_s
+        symstr += ns
+      }
+    end
+  end
+
+  # append 'static' qualifier.
+  if (rettypes.include?('static'))
+    symstr += 'L'
+  end
+
+  # append the function name.
+  symstr += name.size.to_s
+  symstr += name
+
+  # append template params.
+  if (!tpltparams.empty?)
+    symstr += mangle_template(tpltargs, tpltparams)
+  end
+
+  symstr
+end
+
+def mangle_template(args, params)
+  dststr = 'I'
+  args.each { |arg|
+    param = params.shift
+    if arg.split(/\s+/).size == 1 # param is a typename. eg) T, CLASS, REAL
+      dststr += encoded_typename(param)
+    else # param is a variable. eg) int N, char CCODE
+      typename = arg.split(/\s+/)
+      typename = typename[0..-2].join(' ')
+      c = encoded_typename(typename)
+      case c
+      when /b/
+        bool01 = param =~ /true/ ? '1' : '0'
+        dststr += 'L' + c + bool01 + 'E'
+      when /[ijlmstxy]/
+        litnum = param.gsub(/[^\d]+/, '') # eg) 123ULL => 123
+        dststr += 'L' + c + litnum + 'E'
+      when /[c]/
+        ccode = param.gsub(/\A'(.*)'\z/) { $1 }[-1]
+        dststr += 'L' + c + ccode.to_s + 'E'
+      else
+      end
+    end
+  }
+  dststr += 'Ev' # E:end of template params, v:return type 'void'
+
+  return dststr
+end
+
+def encoded_typename(typename)
+  case typename.strip
+  when /\A bool \z/xms
+    'b'
+  when /\A char \z/xms
+    'c'
+  when /\A double \z/xms
+    'd'
+  when /\A long \s+ double \z/xms
+    'e'
+  when /\A float \z/xms
+    'f'
+  when /\A unsigned \s+ char \z/xms
+    'h'
+  when /\A int \z/xms
+    'i'
+  when /\A unsigned \s+ int \z/xms
+    'j'
+  when /\A long \s+ int \z/xms
+    'l'
+  when /\A (?: unsigned \s+ |long \s+){2} int \z/xms
+    'm'
+  when /\A short \s+ int \z/xms
+    's'
+  when /\A (?: unsigned \s+ |short \s+){2} int \z/xms
+    't'
+  when /\A void \z/xms
+    'v'
+  when /\A long \s+ long \s+ int \z/xms
+    'x'
+  when /\A (?: unsigned \s+ |long \s+ long \s+){2} int \z/xms
+    'y'
+  else # struct, enum or union.
+    "#{typename.size}#{typename}"
+  end
+end
+
+#
+# test inputs
+#
+str1 = %Q<void myfunc1(const int*, const int (*)[3][4], unsigned char, double)>
+str2 = %Q<void myfunc2(GOGO, AUAU (*)[5][4], GAGA (**)[XXX]) [with AUAU = double, GAGA = float, GOGO = abc, int XXX = 3, char YYY = 'N']>
+str3 = %Q<const double myfunc(a, b, c)>
+
+str4 = [
+        %Q<void dscudatestKernel(dim3, dim3, size_t, CUstream_st*, REAL*, REAL2*) [with REAL = int, REAL2 = float]>,
+        %Q<_Z10testKernelIifEvPT_PT0_>
+       ]
+
+str5 = [
+        %Q<void dscudatestKernel(dim3, dim3, size_t, CUstream_st*, REAL*, REAL*) [with REAL = float]>,
+        %Q<_Z10testKernelIfEvPT_S1_>
+       ]
+
+str6 = %Q<void getBounds(int, Bounds*, const fvec4*)>
+
+str7 = %Q<void _GLOBAL__N__13_serial_ds_cup_texCell::getBounds(int, Bounds*, const fvec4*)>
+
+str8 = %Q<static void foobar::vecAddT(T1*, T1*) [with T1 = double]>
+
+
+str9 = %Q<void buildOctree(int, CellData*, int*, int*, int*, int*, int2*, float4*, float4*) [with int NCRIT = 64]>
+
+str = str8
+
+if STDIN.tty? # for debugging
+  symstr = pretty_function_to_mangled_name(str)
+  puts "base   : " + symstr
+else
+  symstr = $stdin.read
+  vputs(5, "input        : " + symstr)
+  symstr = pretty_function_to_mangled_name(symstr)
+  vputs(5, "base         : " + symstr)
+  symstr = symstr.chomp
+  printf symstr
+end

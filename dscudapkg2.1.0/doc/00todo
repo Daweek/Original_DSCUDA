@@ -1,0 +1,61 @@
+2014/07/31 ExaFMM に必要な変更:
+
+a. オリジナルの ExaFMM 自体が CUDA6.0 では動作しない (getBounds() 内で
+   unknown error が出る。この問題は横田さんも認識しており、まだ原因を解
+   明できていないため、当面は CUDA5.5 を使う。
+
+b. [2014 年 3 月のミーティングで報告済]
+   Thrust ライブラリの sort 関数はDS-CUDA で扱えないので、その部分は専
+   用の sort 関数呼び出し dscudaSortIntBy32BitKey(),
+   dscudaSortIntBy64BitKey(), dscudaScanIntBy64BitKey()に置き換える。
+   
+c. [2014 年 3 月のミーティングで報告済]
+   cudaBindTexture() へ引数として与えるテクスチャ名が、直接ではなく
+   C++ template パラメタを介して与えられている箇所が 3 箇所あり、これは
+   DS-CUDA で扱えないので、変数の内容を展開してシンボル名を直接与える。
+
+   例) in traversal.h:
+      sourceCells.bind(texCell);
+      CUDA_SAFE_CALL(cudaBindTexture(0, texCell,  // 追加
+      (uint4*)sourceCells.d(), sourceCells.size()*sizeof(CellData))); // 追加
+
+      in cudavec.h:
+      template<typename S>
+        void bind(texture<S,1,cudaReadModeElementType> &tex) {
+        ...
+        tex.normalized     = false;
+        // CUDA_SAFE_CALL(cudaBindTexture(0, tex, (S*)DEVC,  // 削除
+        // SIZE*sizeof(T))); // 削除
+      }
+
+d. [2014 年 3 月以前に対応済]
+   DS-CUDA では pinned memory を扱えないため、cudaMallocHost(),
+   cudaFreeHost() を使っている箇所 (すべて cudavec.h 内) を malloc(),
+   free() に置き換える。
+
+e. 互いに異なる無名の名前空間 2 つそれぞれの内部で関数 getKeys() 定義さ
+   れている (grouptargets.h 内と buildtree.h 内)。DS-CUDA は無名の名前
+   空間を解決できないため、互いの関数名が異なるように変名する。例えば前
+   者を getKeys1() に変名する。
+
+f. オリジナルの cudaDeviceSetSharedMemConfig() が CUDA runtime library
+   本体ではなくヘッダファイル内で定義されており、DS-CUDA クライアントラ
+   イブラリで乗っ取ることができない。DS-CUDA 上でこの API を使用するに
+   は別名 dscudaDeviceSetSharedMemConfig() 経由で呼び出す。DS-CUDA を使
+   用しないオリジナルCUDA 環境でもビルドできるように、この呼び出しはマ
+   クロ定数 __DSCUDA__ で保護する。
+
+   cf. #ifndef __DSCUDA__
+       cudaError_t
+       dscudaDeviceSetSharedMemConfig(cudaSharedMemConfig config)
+       {
+           return cudaDeviceSetSharedMemConfig(config);
+       }
+       #endif
+
+g. cudaFuncSetCacheConfig() は未実装。当面は使用せずに済ませる。
+
+h. サーバプログラム dscudasvr 生成の際には main() 関数を変名する。例え
+   ばマクロ定数 __DSCUDA__ で保護する (cf. userguide-j.pdf 節 4.2)。
+
+

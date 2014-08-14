@@ -1,0 +1,199 @@
+#!/usr/bin/ruby -w
+
+$LOAD_PATH.unshift("#{File.dirname($0)}/../lib/")
+
+require 'English'
+
+# DS-CUDA modules
+require 'utility'
+include Utility
+
+@verbose = (ENV['DSCUDA_WARNLEVEL'] ? ENV['DSCUDA_WARNLEVEL'] : 2).to_i
+
+# convert a g++ __PRETTY_FUNCTION__ string into a mangled function name (i.e., signature).
+# e.g.)   stdin  "void hoe::vecAddT(T1*, T1*, T0*) [with T0 = float, T1 = double]"
+#         stdout "_ZN3hoeL7vecAddTIfdEEvPT0_S2_PT_"
+#
+
+
+
+
+# parse a __PRETTY_FUNCTION__.
+# returns: namespaces, tpltparams, rettype, name, argtypes.
+# e.g.)  in  void hoe::vecAddT(T1*, T1*, T0*) [with T0 = float, T1 = double]
+#        out namespaces: [hoe]
+#            tpltparams: {T0 => float, T1 => double}
+#            rettype   : void
+#            name      : vecAddT
+#            argtypes  : [T1*, T1*, T0*]
+#
+
+def parse_pretty_function(prettystr)
+  predefined_types = %w[
+     bool char double long float unsigned int short void
+  ]
+
+  vputs(3, "prettystr:#{prettystr}\n")
+  prettystr =~ %r{
+                   ((?:\w+ \s+)*)           # $1: return type, e.g., static void
+                   ((?:\w+\:\:)*)           # $2: namespace qualifier, e.g., hoe::, std::
+                   (\w+) \s*                # $3: function name, e.g., vecAddT
+                   \( (.*) \) \s*           # $4: function args, e.g., "T1*, T1*, T0*"
+                   (?: \[ \s* with \s* (.*) \])*  # $5: list of template arg=parameter, e.g., "T0 = float, T1 = double"
+                 }xms
+
+=begin
+  printf("rettype    $1:#{$1}\n")
+  printf("namespaces $2:#{$2}\n")
+  printf("func name  $3:#{$3}\n")
+  printf("func args  $4:#{$4}\n")
+  printf("tpltparams $5:#{$5}\n")
+=end
+
+  rettype = $1 || ""
+  namespaces = $2 || ""
+  name = $3 || ""
+  argtypes = $4 || ""
+  keyvals = $5 || ""
+
+  namespaces = namespaces.split(/\:\:/)
+  argtypes   = argtypes.split(/\s*,\s*/)
+  keyvals    = keyvals.split(/\s*,\s*/)
+  structs    = argtypes.dup
+
+  # extract user defined types.
+  structs = structs.collect { |struct|
+    struct = struct.gsub(/(:? \* | const)/xms, '')
+    struct = struct.gsub(/\s+/, '')
+    struct.split(/\s+/).size == 1 ? struct : nil
+  }.compact
+
+  structs = structs.select { |struct|
+    !predefined_types.include?(struct.gsub(/\*/, ''))
+  }.uniq
+
+=begin
+  p rettype
+  p namespaces
+  p name
+  p argtypes
+  p keyvals
+  p structs
+=end
+  tpltargs = []
+  tpltparams = []
+  keyvals.each {|keyval|
+    keyval =~ /(\w+) \s* = \s* (\w+)/xms
+    tpltargs.push($1)
+    tpltparams.push($2)
+  }
+=begin
+  p tpltargs
+  p tpltparams
+=end
+  return namespaces, rettype, tpltargs, tpltparams, name, argtypes, structs
+end
+
+# convert a __PRETTY_FUNCTION__ into c++ source code.
+# e.g.)  in  void hoe::vecAddT(T1*, T1*, T0*) [with T0 = float, T1 = double]
+#        out namespace hoe {
+#                template <typename T0, typename T1>
+#                void vecAddT(T1* arg0, T1* arg1, T0* arg2) {
+#                }
+#            }
+#            int main(void) {
+#                hoe::vecAdd<float, double>(0, 0, 0);
+#            }
+#
+def pretty_function_to_cxx_source(prettystr)
+  namespaces, rettype, tpltargs, tpltparams, name, argtypes, structs = parse_pretty_function(prettystr)
+
+  dststr = ""
+
+  # begin namespace
+  namespaces.each_with_index { |ns, i|
+    dststr += " " * 4 * i + "namespace #{ns} {\n"
+  }
+  indent = " " * 4 * namespaces.size
+
+  # user defined types
+  structs.each { |s|
+#    dststr += indent + "typedef struct #{s}_t {int dummy;} #{s};\n"
+    dststr += indent + "typedef struct {int dummy;} #{s};\n"
+  }
+
+  # template
+  if (!tpltargs.empty?)
+    str = indent + "template<typename "
+    str += tpltargs.join(", typename ")
+    str += ">\n"
+    dststr += str
+  end
+
+  # return type, function name, function args
+  dststr += indent + "#{rettype} #{name}"
+  str = "("
+  argtypes.each_with_index { |argtype, i|
+    str += "#{argtype} arg#{i}, "
+  }
+  str = str[0..-3]
+  dststr += "#{str}) { }\n"
+
+  #end namespace
+  nelm = namespaces.size
+  namespaces.each_with_index { |ns, i|
+    dststr += " " * 4 * (nelm - i - 1) + "}\n"
+  }
+
+  # main function is necessary only to
+  # instantiate the template.
+  indent = " " * 4
+  if (!tpltargs.empty?)
+    dststr += "int main(void) {\n"
+    str = indent
+    namespaces.each {|ns|
+      str += ns + "::"
+    }
+    str += name
+    str += "<"
+    str += tpltparams.join(", ")
+    str += ">"
+    str += "("
+    str += "0, " * argtypes.size
+    str = str[0..-3]
+    str += ");"
+    dststr += "#{str}\n}\n"
+  end
+
+  return dststr
+
+end
+
+#
+# test inputs
+#
+pretty0 = %Q<void vecAdd(float*, float*, float*)>
+pretty1 = %Q<static void auau::hoe::vecAddT(T1*, T1*, T0*) [with T0 = float, T1 = double]>
+pretty2 = %Q<void vecAddT(T1*, T1*, T0*) [with T0 = float, T1 = float]>
+pretty3 = %Q<void qsort_warp(unsigned int*, unsigned int*, unsigned int, unsigned int, qsortAtomicData*, qsortRingbuf*, unsigned int, unsigned int)>
+symbol3 = %Q<_Z10qsort_warpPjS_jjP17qsortAtomicData_tP14qsortRingbuf_tjj>
+
+pretty4 = %Q<void _GLOBAL__N__13_serial_ds_cup_texCell::getBounds(int, Bounds*, const fvec4*)>
+pretty5 = %Q<void getBounds(int, Bounds*, const fvec4*)>
+
+if STDIN.tty? # for debugging
+  dummysrc = pretty_function_to_cxx_source(pretty1)
+else
+  pstr = $stdin.read
+  vputs(3, "input        : " + pstr)
+  dummysrc = pretty_function_to_cxx_source(pstr)
+  dummysrc.gsub!(/\n/, ' ')
+end
+
+cmd = %Q{echo " } + dummysrc + %Q{ " | g++ -x c++ -S - -o- | grep "^_.*:$" | sed -e 's/:$//' }
+
+vputs(3, "dummysrc: #{dummysrc}\n")
+symbol = `#{cmd}`
+symbol = symbol.chomp
+vputs(3, "symbol : '#{symbol}'\n")
+print(symbol)

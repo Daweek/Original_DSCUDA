@@ -1,0 +1,23 @@
+.SUFFIXES: .cu
+
+NVCCOPT = -g -use_fast_math -arch=sm_35 -rdc=true
+LFLAGS = -lcudadevrt
+LFLAGS += -DMASS # Use all positive sources
+
+CPP              = g++ -g
+DSCUDAPATH      ?= ../..
+DSCUDACPP        = $(DSCUDAPATH)/bin/dscudacpp
+TARGET           = serial
+SRC              = thrust.cu serial.cu
+OBJ              = $(SRC:%.cu=%.o)
+
+all:   $(TARGET)
+
+$(TARGET): $(OBJ)
+	$(DSCUDACPP) $(NVCCOPT) -o $@ -i $(OBJ) $(LFLAGS)
+
+%.o: %.cu
+	$(DSCUDACPP) $(NVCCOPT) -c -I. -o $@ -i $< $(LFLAGS)
+
+clean:
+	rm -rf *.o *.out ./dscudatmp ./plummer.dat dscudasvr $(TARGET)_tcp $(TARGET)_ibv

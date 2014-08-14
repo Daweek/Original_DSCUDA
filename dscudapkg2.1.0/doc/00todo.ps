@@ -1,0 +1,476 @@
+%!PS-Adobe-1.0
+%%Title: ./00todo
+%%Creator: Id: a2ps,v 1.39 1995/12/14 09:17:32 utashiro Exp 
+%%CreationDate: Thu Jul 31 10:42:50 2014
+%%Pages: (atend)
+%%PageOrder: Ascend
+%%DocumentPaperSizes: A4
+%%Orientation: Portrait
+%%EndComments
+
+/$a2psdict 100 dict def
+$a2psdict begin
+% Initialize page description variables.
+/inch {72 mul} bind def
+%% SelectTray
+statusdict /a4tray known { statusdict begin a4tray end } if
+/landscape false def
+/twinpage false def
+/sheetheight 11.64 inch def
+/sheetwidth 8.27 inch def
+/lmargin 1.2 inch def
+/smargin 1.2 inch def
+/paper_adjust 0.05 inch def
+/noborder true def
+/noheader true def
+/headersize 0.0 def
+/nofooter true def
+/nopunchmark true def
+/bodyfontsize 9.8 def
+/kanjiAsciiRatio 1 def
+/lines 68 def
+/columns 85 def
+/date (Jul 31 19114 10:42) def
+/doasciimag false def
+%!  PostScript Source Code
+%
+%  File: imag:/users/local/a2ps/header.ps
+%  Created: Tue Nov 29 12:14:02 1988 by miguel@imag (Miguel Santana)
+%  Version: 2.0
+%  Description: PostScript prolog for a2ps ascii to PostScript program.
+% 
+%  Edit History:
+%  - Original version by evan@csli (Evan Kirshenbaum).
+%  - Modified by miguel@imag to:
+%    1) Correct an overflow bug when printing page number 10 (operator
+%	cvs).
+%    2) Define two other variables (sheetwidth, sheetheight) describing
+%	the physical page (by default A4 format).
+%    3) Minor changes (reorganization, comments, etc).
+%  - Modified by tullemans@apolloway.prl.philips.nl
+%    1) Correct stack overflows with regard to operators cvs and copy.
+%       The resulting substrings where in some cases not popped off 
+%       the stack, what can result in a stack overflow.
+%    2) Replaced copypage and erasepage by showpage. Page througput
+%       degrades severely (see red book page 140) on our ps-printer
+%       after printing sheet 16 (i.e. page 8) of a file which was 
+%       actually bigger. For this purpose the definitions of startdoc
+%       and startpage are changed.
+%  - Modified by Tim Clark <T.Clark@uk.ac.warwick> to:
+%    1) Print one page per sheet (portrait) as an option.
+%    2) Reduce size of file name heading, if it's too big.
+%    3) Save and restore PostScript state at begining/end. It now uses
+%	conventional %%Page %%Trailer markers.
+%    4) Print one wide page per sheet in landscape mode as an option.
+%  - Modified by miguel@imag.fr to
+%    1) Add new option to print n copies of a file.
+%    2) Add new option to suppress heading printing.
+%    3) Add new option to suppress page surrounding border printing.
+%    4) Add new option to change font size. Number of lines and columns
+%	are now automatically adjusted, depending on font size and
+%	printing mode used.
+%    5) Minor changes (best layout, usage message, etc).
+%  - Modified by kanazawa@sra.co.jp to:
+%    1) Handle Japanese code
+%  - Modified by utashiro@sra.co.jp to:
+%    1) Fix bug in printing long label
+%    2) Handle carriage-return
+%    3) Specify kanji-ascii character retio
+%    4) Add footer label
+%    5) Change filename->fname becuase ghostscript has operator filename
+%    6) Support three different font style
+%    7) Incorporate B4 paper support and punchmark contributed
+%       by Masami Ueno <cabbage@kki.esi.yamanashi.ac.jp>
+%
+
+% Copyright (c) 1988, Miguel Santana, miguel@imag.imag.fr
+%
+% Permission is granted to copy and distribute this file in modified
+% or unmodified form, for noncommercial use, provided (a) this copyright
+% notice is preserved, (b) no attempt is made to restrict redistribution
+% of this file, and (c) this file is not distributed as part of any
+% collection whose redistribution is restricted by a compilation copyright.
+%
+
+
+% General macros.
+/xdef {exch def} bind def
+/getfont {exch findfont exch scalefont} bind def
+
+% Page description variables and inch function are defined by a2ps program.
+
+% Character size for differents fonts.
+   landscape
+   { /filenamefontsize 12 def }
+   { /filenamefontsize 16 def }
+ifelse
+/datefontsize filenamefontsize 0.8 mul def
+/headermargin filenamefontsize 0.25 mul def
+/bodymargin bodyfontsize 0.7 mul def
+
+% Font assignment to differents kinds of "objects"
+/filenamefontname /Helvetica-Bold def
+/stdfilenamefont filenamefontname filenamefontsize getfont def
+/datefont /Helvetica datefontsize getfont def
+/footerfont /Helvetica-Bold datefontsize getfont def
+/mag { doasciimag { [ 1 0 0 asciimagsize 0 0 ] makefont } if } def
+/bodynfont /Courier bodyfontsize getfont mag def
+/bodybfont /Courier-Bold bodyfontsize getfont mag def
+/bodyofont /Courier-BoldOblique bodyfontsize getfont mag def
+/fontarray [ bodynfont bodybfont bodyofont ] def
+/bodyfont bodynfont def
+
+% Initializing kanji fonts
+/kanji_initialized false def
+/kanji_init {
+   kanji_initialized not
+   {
+      /bodykfontsize bodyfontsize kanjiAsciiRatio mul def
+      /bodyknfont /Ryumin-Light-H bodykfontsize getfont def
+      /bodykbfont /GothicBBB-Medium-H bodykfontsize getfont def
+      /bodykofont bodykbfont [ 1 0 .2 1 0 0 ] makefont def
+      /KanjiRomanDiff 1.2 bodyfontsize mul 1.0 bodykfontsize mul sub def
+      /KanjiRomanDiffHalf KanjiRomanDiff 2 div def
+      /kfontarray [ bodyknfont bodykbfont bodykofont ] def
+      /kanji_initialized true def
+   } if
+} def
+
+% Backspace width
+/backspacewidth
+   bodyfont setfont (0) stringwidth pop
+   def
+
+% Logical page attributs (a half of a real page or sheet).
+/pagewidth
+   bodyfont setfont (0) stringwidth pop columns mul bodymargin dup add add
+   def
+/pageheight
+   bodyfontsize 1.1 mul lines mul bodymargin dup add add headersize add
+   def
+
+% Coordinates for upper corner of a logical page and for sheet number.
+% Coordinates depend on format mode used.
+% In twinpage mode, coordinate x of upper corner is not the same for left
+% and right pages: upperx is an array of two elements, indexed by sheetside.
+/rightmargin smargin 3 div def
+/leftmargin smargin 2 mul 3 div def
+/topmargin lmargin twinpage {3} {2} ifelse div def
+landscape
+{  % Landscape format
+   /punchx .4 inch def           % for PunchMark
+   /punchy sheetwidth 2 div def  % for PunchMark
+   /uppery rightmargin pageheight add bodymargin add def
+   /sheetnumbery sheetwidth leftmargin pageheight add datefontsize add sub def
+   twinpage
+   {  % Two logical pages
+      /upperx [ topmargin 2 mul			% upperx for left page
+		dup topmargin add pagewidth add	% upperx for right page
+	      ] def
+      /sheetnumberx sheetheight topmargin 2 mul sub def
+   }
+   {  /upperx [ topmargin dup ] def
+      /sheetnumberx sheetheight topmargin sub datefontsize sub def
+   }
+   ifelse
+}
+{  % Portrait format
+   /punchx .3 inch def
+   /punchy sheetheight 2 div def
+   /uppery topmargin pageheight add def
+   /upperx [ leftmargin dup ] def
+   /sheetnumberx sheetwidth rightmargin sub datefontsize sub def
+   /sheetnumbery
+	 sheetheight 
+	 topmargin pageheight add datefontsize add headermargin add
+      sub
+      def
+}
+ifelse
+
+% Strings used to make easy printing numbers
+/pnum 12 string def
+/empty 12 string def
+
+% Other initializations.
+datefont setfont
+/datewidth date stringwidth pop def
+/pagenumwidth (Page 999) stringwidth pop def
+/filenameroom
+         pagewidth
+	 filenamefontsize 4 mul datewidth add pagenumwidth add
+      sub
+   def
+
+
+% Function startdoc: initializes printer and global variables.
+/startdoc
+    { /sheetside 0 def			% sheet side that contains current page
+      /sheet 1 def			% sheet number
+   } bind def
+
+% Function newfile: init file name for each new file.
+/newfile
+    { cleanup
+      /fname xdef
+      stdfilenamefont setfont
+      /filenamewidth fname stringwidth pop def
+      /filenamefont
+	 filenamewidth filenameroom gt
+	 {
+	       filenamefontname
+	       filenamefontsize filenameroom mul filenamewidth div
+	    getfont
+	 }
+	 {  stdfilenamefont }
+	 ifelse
+	 def
+    } bind def
+
+% Function printpage: Print a physical page.
+/printpage
+    { /sheetside 0 def
+      twinpage
+      {  noborder not
+	    { sheetnumber }
+	 if
+      }
+      {  noheader noborder not and
+	    { sheetnumber }
+	 if
+      }
+      ifelse
+      showpage 
+%      pagesave restore
+      /sheet sheet 1 add def
+    } bind def
+
+% Function cleanup: terminates printing, flushing last page if necessary.
+/cleanup
+    { twinpage sheetside 1 eq and
+         { printpage }
+      if
+    } bind def
+
+%
+% Function startpage: prints page header and page border and initializes
+% printing of the file lines.  Page number is stored on the top of stack.
+/startpage
+    { /pagenum exch def
+      sheetside 0 eq
+	{ % /pagesave save def
+	  landscape
+	    { sheetwidth 0 inch translate	% new coordinates system origin
+	      90 rotate				% landscape format
+	      paper_adjust neg 0 translate
+	    } if
+	} if
+      noborder not { printborder } if
+      noheader not { printheader } if
+      nofooter not { printfooter } if
+      nopunchmark not { punchmark } if
+	 upperx sheetside get  bodymargin  add
+	    uppery
+	    bodymargin bodyfontsize add  noheader {0} {headersize} ifelse  add
+	 sub
+      moveto
+    } bind def
+
+% Function printheader: prints page header.
+/printheader
+    { upperx sheetside get  uppery headersize sub 1 add  moveto
+      datefont setfont
+      gsave
+        datefontsize headermargin rmoveto
+	date show					% date/hour
+      grestore
+      gsave
+	pagenum pnum cvs pop
+	   pagewidth pagenumwidth sub
+	   headermargin
+	rmoveto
+        (Page ) show pnum show				% page number
+      grestore
+      empty pnum copy pop
+      gsave
+        filenamefont setfont
+	      filenameroom fname stringwidth pop sub 2 div datewidth add
+	      filenamefontsize 2 mul 
+	   add 
+	   headermargin
+	rmoveto
+        fname show						% file name
+      grestore
+    } bind def
+
+% Function printfooter: prints page footer.
+/printfooter
+    { upperx 0 get sheetnumbery moveto
+      footerfont setfont
+      fname show
+    } bind def
+
+% Function printborder: prints border page.
+/printborder 
+    { upperx sheetside get uppery moveto
+      gsave					% print the four sides
+        pagewidth 0 rlineto			% of the square
+        0 pageheight neg rlineto
+        pagewidth neg 0 rlineto
+        closepath stroke
+      grestore
+      noheader not
+         { 0 headersize neg rmoveto pagewidth 0 rlineto stroke }
+      if
+    } bind def
+
+% Punch Marker
+/punchmark {
+  gsave
+    newpath punchx punchy moveto
+    punchx 2 add punchy -0.5 add lineto
+    punchx 2 add punchy 0.5 add lineto
+    punchx punchy lineto
+    closepath
+    0 setgray .8 setlinewidth stroke
+  grestore
+  } bind def
+
+%
+% Function endpage: adds a sheet number to the page (footnote) and prints
+% the formatted page (physical impression). Activated at the end of each
+% source page (lines reached or FF character).
+/endpage
+   { twinpage  sheetside 0 eq  and
+        { /sheetside 1 def }
+        { printpage }
+     ifelse
+   } bind def
+
+% Function sheetnumber: prints the sheet number.
+/sheetnumber
+    { sheetnumberx sheetnumbery moveto
+      datefont setfont
+      sheet pnum cvs
+	 dup stringwidth pop (0) stringwidth pop sub neg 0 rmoveto show
+      empty pnum copy pop
+    } bind def
+
+% Function bs: go back one character width to emulate BS
+/bs { backspacewidth neg 0 rmoveto } bind def
+
+% Function s: print a source string
+/s  { fontarray fonttype get setfont
+      show
+    } bind def
+
+% Function ks: print a kanji source string
+/ks { kfontarray fonttype get setfont
+      KanjiRomanDiffHalf 0 rmoveto
+      KanjiRomanDiff 0 3 -1 roll ashow
+      KanjiRomanDiffHalf neg 0 rmoveto
+    } def
+
+% Function bl: beginning of line
+/bl { gsave } bind def
+
+% Function nl: newline
+/nl {
+      grestore
+      0 bodyfontsize 1.1 mul neg rmoveto
+    } bind def
+
+% Function cr: carriage return
+/cr { grestore } bind def
+
+% Function hlr: half-line up
+/hlr { 0 bodyfontsize 0.55 mul rmoveto } bind def
+
+% Function hlr: half-line down
+/hlf { 0 bodyfontsize 0.55 mul neg rmoveto } bind def
+
+% Function hlr: half-character backward
+/hcr { backspacewidth 2 div neg 0 rmoveto } bind def
+
+% Function hlr: half-character forward
+/hcf { backspacewidth 2 div 0 rmoveto } bind def
+
+/R { /fonttype 0 def } bind def
+/B { /fonttype 1 def } bind def
+/I { /fonttype 2 def } bind def
+R
+/docsave save def
+startdoc
+%%EndProlog
+
+(./00todo) newfile
+/sheet 1 def
+%%Page: 1 1
+1 startpage
+bl ( ) s (2014/07/31 ExaFMM ) s kanji_init ($KI,MW$JJQ99) ks (:) s nl
+bl ( ) s nl
+bl ( ) s (a. ) s (%*%j%8%J%k$N) ks ( ExaFMM ) s (<+BN$,) ks ( CUDA6.0 ) s ($G$OF0:n$7$J$$) ks ( \(getBounds\(\) ) s (Fb$G) ks nl
+bl ( ) s (   unknown error ) s ($,=P$k!#$3$NLdBj$O2#ED$5$s$bG'<1$7$F$*$j!"$^$@860x$r2r) ks nl
+bl ( ) s (   ) s (L@$G$-$F$$$J$$$?$a!"EvLL$O) ks ( CUDA5.5 ) s ($r;H$&!#) ks nl
+bl ( ) s nl
+bl ( ) s (b. [2014 ) s (G/) ks ( 3 ) s (7n$N%_!<%F%#%s%0$GJs9p:Q) ks (]) s nl
+bl ( ) s (   Thrust ) s (%i%$%V%i%j$N) ks ( sort ) s (4X?t$O) ks (DS-CUDA ) s ($G07$\($J$$$N$G!"$=$NItJ,$O@l) ks nl
+bl ( ) s (   ) s (MQ$N) ks ( sort ) s (4X?t8F$S=P$7) ks ( dscudaSortIntBy32BitKey\(\),) s nl
+bl ( ) s (   dscudaSortIntBy64BitKey\(\), dscudaScanIntBy64BitKey\(\)) s ($KCV$-49$\($k!#) ks nl
+bl ( ) s (   ) s nl
+bl ( ) s (c. [2014 ) s (G/) ks ( 3 ) s (7n$N%_!<%F%#%s%0$GJs9p:Q) ks (]) s nl
+bl ( ) s (   cudaBindTexture\(\) ) s ($X0z?t$H$7$FM?$\($k%F%/%9%A%cL>$,!"D>@\\$G$O$J$/) ks nl
+bl ( ) s (   C++ template ) s (%Q%i%a%?$r2p$7$FM?$\($i$l$F$$$k2U=j$,) ks ( 3 ) s (2U=j$"$j!"$3$l$O) ks nl
+bl ( ) s (   DS-CUDA ) s ($G07$\($J$$$N$G!"JQ?t$NFbMF$rE83+$7$F%7%s%\\%kL>$rD>@\\M?$\($k!#) ks nl
+bl ( ) s nl
+bl ( ) s (   ) s (Nc) ks (\) in traversal.h:) s nl
+bl ( ) s (      sourceCells.bind\(texCell\);) s nl
+bl ( ) s (      CUDA_SAFE_CALL\(cudaBindTexture\(0, texCell,  // ) s (DI2C) ks nl
+bl ( ) s (      \(uint4*\)sourceCells.d\(\), sourceCells.size\(\)*sizeof\(CellData\)\)\); // ) s (DI2C) ks nl
+bl ( ) s nl
+bl ( ) s (      in cudavec.h:) s nl
+bl ( ) s (      template<typename S>) s nl
+bl ( ) s (        void bind\(texture<S,1,cudaReadModeElementType> &tex\) {) s nl
+bl ( ) s (        ...) s nl
+bl ( ) s (        tex.normalized     = false;) s nl
+bl ( ) s (        // CUDA_SAFE_CALL\(cudaBindTexture\(0, tex, \(S*\)DEVC,  // ) s (:o=|) ks nl
+bl ( ) s (        // SIZE*sizeof\(T\)\)\); // ) s (:o=|) ks nl
+bl ( ) s (      }) s nl
+bl ( ) s nl
+bl ( ) s (d. [2014 ) s (G/) ks ( 3 ) s (7n0JA0$KBP1~:Q) ks (]) s nl
+bl ( ) s (   DS-CUDA ) s ($G$O) ks ( pinned memory ) s ($r07$\($J$$$?$a!") ks (cudaMallocHost\(\),) s nl
+bl ( ) s (   cudaFreeHost\(\) ) s ($r;H$C$F$$$k2U=j) ks ( \() s ($9$Y$F) ks ( cudavec.h ) s (Fb) ks (\) ) s ($r) ks ( malloc\(\),) s nl
+bl ( ) s (   free\(\) ) s ($KCV$-49$\($k!#) ks nl
+bl ( ) s nl
+bl ( ) s (e. ) s (8_$$$K0[$J$kL5L>$NL>A06u4V) ks ( 2 ) s ($D$=$l$>$l$NFbIt$G4X?t) ks ( getKeys\(\) ) s (Dj5A$5) ks nl
+bl ( ) s (   ) s ($l$F$$$k) ks ( \(grouptargets.h ) s (Fb$H) ks ( buildtree.h ) s (Fb) ks (\)) s (!#) ks (DS-CUDA ) s ($OL5L>$NL>A0) ks nl
+bl ( ) s (   ) s (6u4V$r2r7h$G$-$J$$$?$a!"8_$$$N4X?tL>$,0[$J$k$h$&$KJQL>$9$k!#Nc$\($PA0) ks nl
+bl ( ) s (   ) s (<T$r) ks ( getKeys1\(\) ) s ($KJQL>$9$k!#) ks nl
+bl ( ) s nl
+bl ( ) s (f. ) s (%*%j%8%J%k$N) ks ( cudaDeviceSetSharedMemConfig\(\) ) s ($,) ks ( CUDA runtime library) s nl
+bl ( ) s (   ) s (K\\BN$G$O$J$/%X%C%@%U%!%$%kFb$GDj5A$5$l$F$*$j!") ks (DS-CUDA ) s (%/%i%$%"%s%H%i) ks nl
+bl ( ) s (   ) s (%$%V%i%j$G>h$C<h$k$3$H$,$G$-$J$$!#) ks (DS-CUDA ) s (>e$G$3$N) ks ( API ) s ($r;HMQ$9$k$K) ks nl
+bl ( ) s (   ) s ($OJLL>) ks ( dscudaDeviceSetSharedMemConfig\(\) ) s (7PM3$G8F$S=P$9!#) ks (DS-CUDA ) s ($r;H) ks nl
+bl ( ) s (   ) s (MQ$7$J$$%*%j%8%J%k) ks (CUDA ) s (4D6-$G$b%S%k%I$G$-$k$h$&$K!"$3$N8F$S=P$7$O%^) ks nl
+bl ( ) s (   ) s (%/%mDj?t) ks ( __DSCUDA__ ) s ($GJ]8n$9$k!#) ks nl
+bl ( ) s nl
+bl ( ) s (   cf. #ifndef __DSCUDA__) s nl
+bl ( ) s (       cudaError_t) s nl
+bl ( ) s (       dscudaDeviceSetSharedMemConfig\(cudaSharedMemConfig config\)) s nl
+bl ( ) s (       {) s nl
+bl ( ) s (           return cudaDeviceSetSharedMemConfig\(config\);) s nl
+bl ( ) s (       }) s nl
+bl ( ) s (       #endif) s nl
+bl ( ) s nl
+bl ( ) s (g. cudaFuncSetCacheConfig\(\) ) s ($OL$<BAu!#EvLL$O;HMQ$;$:$K:Q$^$;$k!#) ks nl
+bl ( ) s nl
+bl ( ) s (h. ) s (%5!<%P%W%m%0%i%`) ks ( dscudasvr ) s (@8@.$N:]$K$O) ks ( main\(\) ) s (4X?t$rJQL>$9$k!#Nc$\() ks nl
+bl ( ) s (   ) s ($P%^%/%mDj?t) ks ( __DSCUDA__ ) s ($GJ]8n$9$k) ks ( \(cf. userguide-j.pdf ) s (@a) ks ( 4.2\)) s (!#) ks nl
+bl ( ) s nl
+bl ( ) s nl
+
+endpage
+
+cleanup
+%%Trailer
+docsave restore end
