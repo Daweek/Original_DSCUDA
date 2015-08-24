@@ -1,0 +1,218 @@
+{
+    //switch behavior by "ft.d2h_simple" ,
+    //                   "ft.d2h_reduncpy" 1:copy from all redundant devs.  0: copy from primary dev only.
+    //                   "ft.d2h_compare"  1:compare result from redundant devs.  0:comapre 
+    //                   "ft.d2h_rollback"
+
+    if (simple) {
+        server[0].D2H and return;
+    }
+    if (!reduncpy) {
+        server[0].D2H and return;
+    }
+    for (i=0..ndedundancy-1) {
+        server[i].D2H;
+    }
+    if (compare) {
+    }
+    if (rollback && !matched_all) {
+        restoreMemlist
+    }
+
+
+    if (this->ft.d2h_simple) {
+	//**
+	//** This part include "Simple" DeviceToHost transfer operation.
+	//**
+	//<-- Translate virtual v_ptr to real d_lptr.
+	void *d_src0 = server[0].memlist.queryDevicePtr( d_src );
+	WARN(4, "      + Phy[%d]:D2H( dst=%p, src=%p, count=%zu )\n",
+	     id, h_dst, d_src0, count);
+	if (d_src0 == NULL) { //check Unexpected error.
+	    WARN(0, "%s():d_src0 = NULL.\n", __func__);
+	    exit(1);
+	}
+	//--> Translate virtual v_ptr to real d_lptr.
+
+	//<-- Kick RPC!
+	dscudaMemcpyD2HResult *rp;
+	flag=1; //generate bits-flip faults.
+	//rp = dscudamemcpyd2hid_1( (RCadr)d_src0, count, server[0].Clnt );
+	rp = dscudamemcpyd2hid_1( (RCadr)d_src0, count, flag, server[0].Clnt );
+	//--> Kick RPC!
+	
+	//<--- RPC fault check.
+	clnt_geterr( server[0].Clnt, &rpc_result );
+	if (rpc_result.re_status == RPC_SUCCESS) {//RPC was success?
+	    if (rp == NULL) {//NULL returned from cudaMemcpy() executed on remote host.
+		WARN(0, "NULL pointer returned, %s:%s():L%d.\nexit.\n\n\n",
+		     __FILE__, __func__, __LINE__ );
+		clnt_perror( server[0].Clnt, server[0].ip );
+		exit(EXIT_FAILURE);
+	    }
+	    else {
+		cuerr = (cudaError_t)rp->err;
+	    }
+	}
+	//--> RPC fault check.
+	memcpy( h_dst, rp->buf.RCbuf_val, rp->buf.RCbuf_len );
+	xdr_free( (xdrproc_t)xdr_dscudaMemcpyD2HResult, (char *)rp );
+	WARN(4, "   }\n");
+	return cuerr;
+    } // if (this->ft.d2h_simple) ...
+
+    if (!this->ft.d2h_reduncpy) {
+	//**
+	//** This part seems likely to "Simple" part, but
+	//** need additional one more memcpy();
+	//**
+	//<-- Copy from physical device
+	flag=1; // Not suppose that dominant server is always correct.
+	cuerr = server[0].cudaMemcpyD2H( h_dst, d_src, count, flag, &rpc_result );
+	//--> Copy from physical device
+	//
+	// TODO: d2h_rollback or migration logic need ?
+	//
+	server[0].rpcErrorHook( &rpc_result );
+	if (rpc_result.re_status != RPC_SUCCESS) {
+	    this->restoreMemlist();
+	    this->reclist.recall();
+	}
+	//--- Return device data to user application region.
+	memcpy( h_dst, server[0].memlist.queryHostPtr(d_src), count );
+	WARN(4, "   }\n");
+	return cuerr;
+    } //if (!this->ft.d2h_reduncpy) ...
+
+    //MEMO: below routine may need maintainance.
+    
+    // MEMO: if (d2h_simple==false && d2h_reduncpy==true) {
+    //<--- Copy from physical device(s)
+    for (int i=0; i < this->nredundancy; i++) {
+	flag = 1; // always none-zero probability of fail.
+	cuerr = server[i].cudaMemcpyD2H( h_dst, d_src, count, flag, &rpc_result );
+	server[i].rpcErrorHook( &rpc_result );
+	if (rpc_result.re_status != RPC_SUCCESS) {
+	    this->restoreMemlist();
+	    this->reclist.recall();
+	}
+    }
+    //---> Copy from physical device(s)
+    bool matched_all   = true;
+    if (this->ft.d2h_compare) {
+	//<--- Compare collected data
+	int  matched_count   = 0;
+	int  unmatched_count = 0;
+	int  recall_result;
+	for (int i=0; i < nredundancy-1; i++) {
+	    for (int k=i+1; k < nredundancy; k++) {
+		//--- Compare ByteToByte
+		int memcmp_result = memcmp( server[i].memlist.queryHostPtr(d_src),
+					    server[k].memlist.queryHostPtr(d_src),
+					    count );
+		if (memcmp_result == 0) { // match
+		    server[k].stat_correct++;
+		}
+		else { // unmatch
+		    server[k].stat_error++;
+		    WARN( 2, "   Statistics: \n");
+		    matched_all = false;
+		}
+	    } // k
+	} // i
+	//---> Compare collected data
+
+	if (matched_all) {
+	    WARN(5, "   #(^_^) All %d redun. device(s) matched. statics OK/NG = %d/%d.\n",
+		 nredundancy-1, matched_count, unmatched_count);
+	    //<-- Update user application host region using server[0].
+	    memcpy( h_dst, server[0].memlist.queryHostPtr(d_src), count );
+	    //--> Update user application host region using server[0].
+	}
+	else {
+	    this->ft_unmatch_total++; //count fault.
+	    this->ft_unmatch_d2h++;
+	    WARN_CP(1, " #   #\n");
+	    WARN_CP(1, "  # #\n");
+	    WARN_CP(1, "   #  Detected Unmatched result. OK/NG= %d/%d.\n", matched_count, unmatched_count);
+	    WARN_CP(1, "  # # D2H   umatched count = %d\n", this->ft_unmatch_d2h);
+	    WARN_CP(1, "  # # Total umatched count = %d\n", this->ft_unmatch_total);
+	    WARN_CP(1, " #   #\n");
+	}
+    } // if (ft.d2h_compare) {
+
+    double Tr, Tr_sta; //restre mem
+    double Tx, Tx_sta; //redo api
+    if (ft.d2h_rollback) {
+	if (!matched_all) {
+	    WARN_CP(0, "================================================== cpyD2H begin\n");
+	    //<-- Request Tc timer to reset
+	    WARN_CP(0,"cudaMemcpyD2H wait Tc_reset_mutex unlock... Tc_reset_req=1\n");
+	    pthread_mutex_lock( &Tc_reset_mutex );
+	    Tc_reset_req = 1;
+	    pthread_mutex_unlock( &Tc_reset_mutex );
+	    //--> Request Tc timer to reset
+
+	    //<-- Restore clean data onto GPU device(s) ...[a]
+	    WARN_CP(0, "(+_+)Restore clean data by cpyD2H\n");
+	    
+	    dscuda::stopwatch(&Tr_sta);
+	    for (int i=0; i<St.Nvdev; i++) {
+		St.Vdev[i].restoreMemlist();
+	    }
+	    Tr = dscuda::stopwatch(&Tr_sta, &Tr_min, &Tr_max);
+	    Tr_sum += Tr;
+	    Tr_avr = Tr_sum / (double)ft_unmatch_d2h;
+	    WARN_CP(0, "(._.)Completed restoring the device memory previous backup ");
+	    //--> Restore clean data onto GPU device(s) ...[a]
+
+	    //<-- Rerun recoreded CUDA APIs from CP ...[b]
+	    WARN_CP(0, "(+_+)Rerun the CUDA APIs by cpyD2H\n");
+	    dscuda::stopwatch(&Tx_sta);
+	    for (int i=0; i<St.Nvdev; i++) {
+		St.Vdev[i].reclist.print();
+		St.Vdev[i].recordOFF();
+		WARN_CP(1, "        VirDev[%d]\n", St.Vdev[i].id);
+		St.Vdev[i].reclist.recall();
+		St.Vdev[i].recordON();
+	    }
+	    //--> Rerun recoreded CUDA APIs from CP ...[b]
+	    
+	    //<-- flush all cuda stream
+	    for (int i=0; i<St.Nvdev; i++) {
+		St.Vdev[i].cudaThreadSynchronize();
+	    }
+	    WARN_CP(0, "Synchronize() Rollbacked CUDA APIs.\n");
+	    //--> flush all cuda stream
+	    Tx = dscuda::stopwatch(&Tx_sta, &Tx_min, &Tx_max);
+	    Tx_sum += Tx;
+	    Tx_avr =  Tx_sum / (double)ft_unmatch_d2h;
+
+
+	    //<-- Output ending message.	
+	    WARN_CP(0," 'Name' = 'now' { 'min' , 'avr' , 'max' } 'sum'\n");
+	    if (ft_unmatch_d2h > 0) {
+		WARN_CP(0," *Tr= %8.3f { %8.3f , %8.3f , %8.3f } %8.3f (%d)\n",
+			Tr, Tr_min, Tr_avr, Tr_max, Tr_sum, ft_unmatch_d2h);
+		WARN_CP(0," *Tx= %8.3f { %8.3f , %8.3f , %8.3f } %8.3f (%d)\n",
+			Tx, Tx_min, Tx_avr, Tx_max, Tx_sum, ft_unmatch_d2h);
+	    }
+	    else {
+		WARN_CP(0," *Tr= - { - , - , - } %8.3f (%d)\n", Tr_sum, ft_unmatch_d2h);
+		WARN_CP(0," *Tx= - { - , - , - } %8.3f (%d)\n", Tx_sum, ft_unmatch_d2h);
+	    }
+	    //<-- flush all cuda stream
+	    for (int i=0; i<St.Nvdev; i++) {
+		WARN_CP(0," Vdev[%d].ft_unmatch_count= %d\n", i, St.Vdev[i].ft_unmatch_total);
+	    }
+
+	    //<-- Clear Request Tc timer to reset
+	    WARN_CP(0,"cudaMemcpyD2H wait Tc_reset_mutex unlock... Tc_reset_req=0\n");
+	    pthread_mutex_lock( &Tc_reset_mutex );
+	    Tc_reset_req = 0;
+	    pthread_mutex_unlock( &Tc_reset_mutex );
+	    //--> Clear Request Tc timer to reset
+	    WARN_CP(0, "================================================== cpyD2H end\n");
+	} //if (!matched_all)
+    } //if (ft.d2h_rollback)...
+    WARN(4, "   }\n");
